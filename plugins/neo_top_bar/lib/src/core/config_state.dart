@@ -87,6 +87,31 @@ class NeoTopBarConfigState extends ChangeNotifier {
     );
   }
 
+  /// Puts a module on [zone] and switches it on, as one action.
+  ///
+  /// This is the add button under each zone: three changes (enable, zone, place
+  /// last) that the user made as one, so they are saved as one and only one
+  /// rebuild and one file write follow.
+  Future<void> addToZone(
+    String id, {
+    required NeoZone zone,
+    required Iterable<NeoModuleDescriptor> descriptors,
+    NeoZone? defaultZone,
+  }) {
+    final preference = (_config.modules[id] ?? const NeoModulePreference())
+        .withEnabled(true)
+        .withZone(zone == defaultZone ? null : zone);
+    return _update(
+      moveModuleToSlot(
+        config: _config.withPreference(id, preference),
+        descriptors: descriptors,
+        moduleId: id,
+        targetZone: zone,
+        beforeId: null,
+      ),
+    );
+  }
+
   /// Moves one module [offset] places inside its own zone and persists it.
   ///
   /// Delegates to [moveModuleInZone], which materializes the zone's effective

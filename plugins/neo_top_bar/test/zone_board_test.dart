@@ -1,0 +1,116 @@
+/// Tests for the settings panel's zone board rules.
+///
+/// Both rules exist because getting them wrong is easy and invisible: a drop
+/// that lands one place off, and an add menu that offers what is already there.
+library;
+
+import 'package:neo_top_bar/neo_top_bar_logic.dart';
+import 'package:test/test.dart';
+
+const _descriptors = <NeoModuleDescriptor>[
+  NeoModuleDescriptor(
+    id: 'a',
+    label: 'A',
+    description: '',
+    zone: NeoZone.start,
+    priority: 10,
+  ),
+  NeoModuleDescriptor(
+    id: 'b',
+    label: 'B',
+    description: '',
+    zone: NeoZone.start,
+    priority: 20,
+  ),
+  NeoModuleDescriptor(
+    id: 'c',
+    label: 'C',
+    description: '',
+    zone: NeoZone.end,
+    priority: 10,
+  ),
+  NeoModuleDescriptor(
+    id: 'd',
+    label: 'D',
+    description: '',
+    zone: NeoZone.end,
+    priority: 20,
+    defaultEnabled: false,
+  ),
+];
+
+List<NeoModulePlacement> placements() =>
+    resolvePlacements(descriptors: _descriptors, config: NeoTopBarConfig.empty);
+
+void main() {
+  group('neoBeforeIdAfterReorder', () {
+    // Flutter's `onReorderItem` reports the index *after* the item was lifted
+    // out, so these are the four shapes a drop can take.
+    const ids = <String>['a', 'b', 'c'];
+
+    test('dropping at the front lands in front of the old first', () {
+      expect(neoBeforeIdAfterReorder(ids, 2, 0), 'a');
+    });
+
+    test('dropping in the middle lands in front of the right neighbour', () {
+      // 'b' moves down one slot: after removal the list is [a, c], and index 1
+      // is 'c', so 'b' goes in front of 'c'.
+      expect(neoBeforeIdAfterReorder(ids, 1, 1), 'c');
+    });
+
+    test('dropping at the end appends', () {
+      expect(neoBeforeIdAfterReorder(ids, 0, 2), isNull);
+      expect(neoBeforeIdAfterReorder(ids, 0, 99), isNull);
+    });
+
+    test('a one-item zone drops to nothing to sit in front of', () {
+      expect(neoBeforeIdAfterReorder(const <String>['a'], 0, 0), isNull);
+    });
+
+    test('an out-of-range index is not a crash', () {
+      expect(neoBeforeIdAfterReorder(ids, 5, 0), isNull);
+      expect(neoBeforeIdAfterReorder(ids, -1, 0), isNull);
+    });
+  });
+
+  group('neoAddCandidates', () {
+    test('offers what is not already on the zone', () {
+      final candidates = neoAddCandidates(
+        placements: placements(),
+        zone: NeoZone.start,
+      );
+      // 'a' and 'b' are already on the left, so only the other two are offered.
+      expect(candidates.map((entry) => entry.descriptor.id), <String>[
+        'c',
+        'd',
+      ]);
+    });
+
+    test('distinguishes a move from an add, and says where it is now', () {
+      final candidates = neoAddCandidates(
+        placements: placements(),
+        zone: NeoZone.start,
+      );
+      final move = candidates.singleWhere(
+        (entry) => entry.descriptor.id == 'c',
+      );
+      expect(move.effect, NeoAddEffect.move);
+      expect(move.currentZone, NeoZone.end);
+
+      final add = candidates.singleWhere((entry) => entry.descriptor.id == 'd');
+      expect(add.effect, NeoAddEffect.add);
+      expect(add.currentZone, isNull);
+    });
+
+    test('a fully populated zone offers nothing', () {
+      final all = placements().map((placement) {
+        return NeoModulePlacement(
+          descriptor: placement.descriptor,
+          enabled: true,
+          zone: NeoZone.center,
+        );
+      });
+      expect(neoAddCandidates(placements: all, zone: NeoZone.center), isEmpty);
+    });
+  });
+}

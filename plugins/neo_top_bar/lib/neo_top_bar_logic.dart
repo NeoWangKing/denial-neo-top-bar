@@ -13,3 +13,4 @@ export 'src/core/module_descriptor.dart';
 export 'src/core/popup_geometry.dart';
 export 'src/core/preferences.dart' show NeoTopBarPreferencesStore;
 export 'src/core/window_order.dart';
+export 'src/core/zone_board.dart';

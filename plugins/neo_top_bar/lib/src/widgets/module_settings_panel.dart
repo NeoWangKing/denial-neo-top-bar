@@ -6,12 +6,16 @@
 /// for opening a separate native window, so this is a large **centered** popup
 /// card: Denial's own detail-popup mechanism, scaled up to read as a window.
 ///
-/// Each module gets one row plus an expandable area. The row carries only what
-/// every module has — its name, its description and its on/off switch — and the
-/// expansion carries the placement controls and the module's own settings. That
-/// split exists because the previous single-line row was already full: name,
-/// reorder, zone and toggle left nowhere for a module like the control centre to
-/// put its own options, and adding them to the row would have made it unusable.
+/// The card is organised as a board: one section per zone, holding that zone's
+/// modules as draggable cards and an **add** button underneath. Placement is
+/// therefore expressed by *where a card is* and *which section added it*, not by
+/// repeating a left/centre/right selector and up/down buttons on every row —
+/// those were four controls per row doing what dragging and one button per zone
+/// do better, and they left no room for a module's own settings.
+///
+/// Each card still carries what only it can: its name, its description, its
+/// on/off switch, and an expandable area with its own settings. Dragging is
+/// scoped to a section, because a zone is the only place order means anything.
 library;
 
 import 'package:denial_flutter_sdk/popups.dart';
@@ -25,6 +29,7 @@ import '../core/config_state.dart';
 import '../core/module.dart';
 import '../core/module_descriptor.dart';
 import '../core/module_registry.dart';
+import '../core/zone_board.dart';
 import 'neo_popup_surface.dart';
 import 'neo_setting_controls.dart';
 
@@ -91,8 +96,11 @@ class NeoModuleSettingsPanel extends StatelessWidget {
           config: state.config,
         );
         // Grouped by zone, because reordering only ever happens inside one zone.
+        // Only enabled modules appear: a switched-off module is not on the bar,
+        // so it belongs in the add list rather than on the board.
         final byZone = <NeoZone, List<NeoModulePlacement>>{};
         for (final placement in placements) {
+          if (!placement.enabled) continue;
           (byZone[placement.zone] ??= <NeoModulePlacement>[]).add(placement);
         }
         return NeoPopupSurface(
@@ -122,8 +130,9 @@ class NeoModuleSettingsPanel extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(top: 4, bottom: 12),
                 child: Text(
-                  '开关组件；点每行右侧的「设置」展开它的位置、顺序'
-                  '和它自己的选项（列表越靠上，在横栏上越靠左）。',
+                  '拖动卡片调整同一区内的顺序（越靠上，在横栏上越靠左）；'
+                  '点卡片里的「设置」展开它自己的选项；'
+                  '每区底部的「添加组件」把组件放到那一段。',
                   style: theme.text.systemBarCaption.copyWith(
                     color: theme.colors.textTertiary,
                     fontSize: 12,
@@ -149,22 +158,15 @@ class NeoModuleSettingsPanel extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(vertical: 4),
                   children: [
                     for (final zone in NeoZone.values)
-                      if (byZone[zone] case final rows?
-                          when rows.isNotEmpty) ...[
-                        _ZoneHeader(zone: zone, count: rows.length),
-                        for (var index = 0; index < rows.length; index++)
-                          _ModuleRow(
-                            placement: rows[index],
-                            state: state,
-                            descriptors: descriptors,
-                            services: services,
-                            monitorId: monitorId,
-                            // Reordering is per zone, so the buttons are only
-                            // live where a move is actually possible.
-                            canMoveUp: index > 0,
-                            canMoveDown: index < rows.length - 1,
-                          ),
-                      ],
+                      _ZoneSection(
+                        zone: zone,
+                        rows: byZone[zone] ?? const <NeoModulePlacement>[],
+                        placements: placements,
+                        state: state,
+                        descriptors: descriptors,
+                        services: services,
+                        monitorId: monitorId,
+                      ),
                   ],
                 ),
               ),
@@ -238,32 +240,139 @@ class _ZoneHeader extends StatelessWidget {
   }
 }
 
-/// One module: its identity and on/off switch, then an expandable area holding
-/// its placement controls and its own settings.
-class _ModuleRow extends StatefulWidget {
-  const _ModuleRow({
-    required this.placement,
+/// One zone: its cards, then the button that adds another.
+class _ZoneSection extends StatelessWidget {
+  const _ZoneSection({
+    required this.zone,
+    required this.rows,
+    required this.placements,
     required this.state,
     required this.descriptors,
-    required this.canMoveUp,
-    required this.canMoveDown,
     required this.services,
     required this.monitorId,
   });
 
-  final NeoModulePlacement placement;
+  final NeoZone zone;
+  final List<NeoModulePlacement> rows;
+  final List<NeoModulePlacement> placements;
   final NeoTopBarConfigState state;
   final Iterable<NeoModuleDescriptor> descriptors;
-  final bool canMoveUp;
-  final bool canMoveDown;
   final ShellServices services;
   final int monitorId;
 
+  /// The id a drop at [newIndex] should end up in front of, as the configuration
+  /// expresses placement.
+  void _reorder(int oldIndex, int newIndex) {
+    final ids = <String>[for (final row in rows) row.descriptor.id];
+    state.moveToSlot(
+      ids[oldIndex],
+      targetZone: zone,
+      beforeId: neoBeforeIdAfterReorder(ids, oldIndex, newIndex),
+      descriptors: descriptors,
+    );
+  }
+
   @override
-  State<_ModuleRow> createState() => _ModuleRowState();
+  Widget build(BuildContext context) {
+    final theme = ShellTheme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _ZoneHeader(zone: zone, count: rows.length),
+        if (rows.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Text(
+              '这一段还没有组件。',
+              style: theme.text.systemBarCaption.copyWith(
+                color: theme.colors.textTertiary,
+              ),
+            ),
+          )
+        else
+          ReorderableListView(
+            // The panel owns the scrolling; a nested scrollable here would
+            // fight it, and a zone is short enough that losing drag
+            // auto-scroll costs nothing.
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            buildDefaultDragHandles: false,
+            onReorderItem: _reorder,
+            proxyDecorator: _draggedCardDecorator,
+            children: [
+              for (final row in rows)
+                _ModuleCard(
+                  key: ValueKey<String>('settings-${row.descriptor.id}'),
+                  placement: row,
+                  state: state,
+                  services: services,
+                  monitorId: monitorId,
+                  index: rows.indexOf(row),
+                ),
+            ],
+          ),
+        _AddModuleButton(
+          zone: zone,
+          candidates: neoAddCandidates(placements: placements, zone: zone),
+          state: state,
+          descriptors: descriptors,
+        ),
+      ],
+    );
+  }
 }
 
-class _ModuleRowState extends State<_ModuleRow> {
+/// How a card looks while it is being dragged.
+///
+/// The default decorator wraps the child in a `Material`, which this shell has no
+/// use for: the bar's surfaces are glass, not Material, and an elevation shadow
+/// would be the only one on screen. A slight scale and an accent ring read as
+/// "lifted" in the same language as the bar's own drag.
+Widget _draggedCardDecorator(
+  Widget child,
+  int index,
+  Animation<double> animation,
+) => AnimatedBuilder(
+  animation: animation,
+  builder: (context, _) {
+    final theme = ShellTheme.of(context);
+    return Transform.scale(
+      scale: 1 + 0.01 * animation.value,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(theme.chipRadius),
+          border: Border.all(
+            color: theme.accent.withValues(alpha: 0.75 * animation.value),
+          ),
+        ),
+        child: child,
+      ),
+    );
+  },
+);
+
+/// One module: a card with its identity, its switch, and its own settings.
+class _ModuleCard extends StatefulWidget {
+  const _ModuleCard({
+    required this.placement,
+    required this.state,
+    required this.services,
+    required this.monitorId,
+    required this.index,
+    super.key,
+  });
+
+  final NeoModulePlacement placement;
+  final NeoTopBarConfigState state;
+  final ShellServices services;
+  final int monitorId;
+  final int index;
+
+  @override
+  State<_ModuleCard> createState() => _ModuleCardState();
+}
+
+class _ModuleCardState extends State<_ModuleCard> {
   bool _expanded = false;
 
   @override
@@ -273,80 +382,115 @@ class _ModuleRowState extends State<_ModuleRow> {
     final module = NeoTopBarModules.byId(descriptor.id);
     final configurable = module is NeoModuleSettings;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: theme.colors.surfaceContainerLow.withValues(alpha: 0.5),
+          borderRadius: BorderRadius.circular(theme.chipRadius),
+          border: Border.all(color: theme.colors.hairlineSoft),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(6, 10, 12, 10),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Text(
-                  descriptor.label,
-                  style: theme.text.systemBarValue.copyWith(
-                    fontSize: 14,
-                    color: widget.placement.enabled
-                        ? theme.colors.textPrimary
-                        : theme.colors.textSecondary,
+              ReorderableDragStartListener(
+                index: widget.index,
+                child: Tooltip(
+                  message: '拖动调整这一区内的顺序',
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.grab,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      child: Icon(
+                        Icons.drag_indicator,
+                        size: 18,
+                        color: theme.colors.textTertiary,
+                      ),
+                    ),
                   ),
                 ),
               ),
-              const SizedBox(width: 10),
-              NeoSettingToggle(
-                value: widget.placement.enabled,
-                onChanged: (value) =>
-                    widget.state.setEnabled(descriptor.id, enabled: value),
-              ),
-            ],
-          ),
-          const SizedBox(height: 2),
-          Row(
-            children: [
               Expanded(
-                child: Text(
-                  descriptor.description,
-                  style: theme.text.systemBarCaption.copyWith(
-                    color: theme.colors.textTertiary,
-                    fontSize: 12,
+                child: ReorderableDelayedDragStartListener(
+                  // Holding the card lifts it too, so the whole card is a drag
+                  // target and the grip is only the quicker way in. The two
+                  // listeners must not nest: a second start while a drag is in
+                  // flight *cancels* the first, which is exactly what a grip
+                  // inside a delayed listener would do half a second after the
+                  // grip started one.
+                  index: widget.index,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              descriptor.label,
+                              style: theme.text.systemBarValue.copyWith(
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          NeoSettingToggle(
+                            value: widget.placement.enabled,
+                            onChanged: (value) => widget.state.setEnabled(
+                              descriptor.id,
+                              enabled: value,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              descriptor.description,
+                              style: theme.text.systemBarCaption.copyWith(
+                                color: theme.colors.textTertiary,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          _ExpanderButton(
+                            expanded: _expanded,
+                            highlighted: configurable,
+                            onPressed: () =>
+                                setState(() => _expanded = !_expanded),
+                          ),
+                        ],
+                      ),
+                      if (_expanded) ...[
+                        const SizedBox(height: 10),
+                        _ExpandedSettings(
+                          placement: widget.placement,
+                          state: widget.state,
+                          module: module,
+                          services: widget.services,
+                          monitorId: widget.monitorId,
+                        ),
+                      ],
+                    ],
                   ),
                 ),
               ),
-              const SizedBox(width: 10),
-              _ExpanderButton(
-                expanded: _expanded,
-                // A module with settings of its own marks the expander, so the
-                // place to look for them is visible without opening every row.
-                highlighted: configurable,
-                onPressed: () => setState(() => _expanded = !_expanded),
-              ),
             ],
           ),
-          if (_expanded) ...[
-            const SizedBox(height: 8),
-            _ExpandedSettings(
-              placement: widget.placement,
-              state: widget.state,
-              descriptors: widget.descriptors,
-              canMoveUp: widget.canMoveUp,
-              canMoveDown: widget.canMoveDown,
-              module: module,
-              services: widget.services,
-              monitorId: widget.monitorId,
-            ),
-          ],
-        ],
+        ),
       ),
     );
   }
 }
 
-/// The inset panel under an expanded row.
+/// The settings a module contributes, inside its own card.
 class _ExpandedSettings extends StatelessWidget {
   const _ExpandedSettings({
     required this.placement,
     required this.state,
-    required this.descriptors,
-    required this.canMoveUp,
-    required this.canMoveDown,
     required this.module,
     required this.services,
     required this.monitorId,
@@ -354,9 +498,6 @@ class _ExpandedSettings extends StatelessWidget {
 
   final NeoModulePlacement placement;
   final NeoTopBarConfigState state;
-  final Iterable<NeoModuleDescriptor> descriptors;
-  final bool canMoveUp;
-  final bool canMoveDown;
   final NeoModule? module;
   final ShellServices services;
   final int monitorId;
@@ -364,10 +505,9 @@ class _ExpandedSettings extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShellTheme.of(context);
-    final descriptor = placement.descriptor;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: theme.colors.surfaceContainerLow.withValues(alpha: 0.55),
+        color: theme.colors.surfaceContainer.withValues(alpha: 0.45),
         borderRadius: BorderRadius.circular(theme.chipRadius),
         border: Border.all(color: theme.colors.hairlineSoft),
       ),
@@ -376,56 +516,8 @@ class _ExpandedSettings extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            NeoSettingRow(
-              label: '位置',
-              description: '停在栏的左 / 中 / 右哪一段',
-              child: _ZoneSelector(
-                zone: placement.zone,
-                onChanged: (zone) => state.setZone(
-                  descriptor.id,
-                  zone: zone,
-                  defaultZone: descriptor.zone,
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
-            NeoSettingRow(
-              label: '顺序',
-              description: '在同一区内前后移动',
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _MoveButton(
-                    icon: Icons.keyboard_arrow_up,
-                    tooltip: '在本区内前移',
-                    onPressed: canMoveUp
-                        ? () => state.move(
-                            descriptor.id,
-                            offset: -1,
-                            descriptors: descriptors,
-                          )
-                        : null,
-                  ),
-                  const SizedBox(width: 6),
-                  _MoveButton(
-                    icon: Icons.keyboard_arrow_down,
-                    tooltip: '在本区内后移',
-                    onPressed: canMoveDown
-                        ? () => state.move(
-                            descriptor.id,
-                            offset: 1,
-                            descriptors: descriptors,
-                          )
-                        : null,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-            Divider(height: 1, color: theme.colors.hairlineSoft),
-            const SizedBox(height: 10),
             Text(
-              '「${descriptor.label}」设置',
+              '「${placement.descriptor.label}」设置',
               style: theme.text.systemBarCaption.copyWith(
                 fontSize: 12,
                 color: theme.colors.textSecondary,
@@ -438,9 +530,9 @@ class _ExpandedSettings extends StatelessWidget {
                 NeoModuleSettingsScope(
                   services: services,
                   monitorId: monitorId,
-                  options: state.config.optionsOf(descriptor.id),
+                  options: state.config.optionsOf(placement.descriptor.id),
                   setOption: (key, value) =>
-                      state.setOption(descriptor.id, key, value),
+                      state.setOption(placement.descriptor.id, key, value),
                 ),
               )
             else
@@ -457,7 +549,145 @@ class _ExpandedSettings extends StatelessWidget {
   }
 }
 
-/// The chevron that opens a module's settings.
+/// The add button under a zone, and the list it opens.
+class _AddModuleButton extends StatefulWidget {
+  const _AddModuleButton({
+    required this.zone,
+    required this.candidates,
+    required this.state,
+    required this.descriptors,
+  });
+
+  final NeoZone zone;
+  final List<NeoAddCandidate> candidates;
+  final NeoTopBarConfigState state;
+  final Iterable<NeoModuleDescriptor> descriptors;
+
+  @override
+  State<_AddModuleButton> createState() => _AddModuleButtonState();
+}
+
+class _AddModuleButtonState extends State<_AddModuleButton> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShellTheme.of(context);
+    if (widget.candidates.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Text(
+          '所有组件都在这一段里了。',
+          style: theme.text.systemBarCaption.copyWith(
+            color: theme.colors.textTertiary,
+          ),
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _OutlineButton(
+            icon: _open ? Icons.expand_less : Icons.add,
+            label: '添加组件',
+            onPressed: () => setState(() => _open = !_open),
+          ),
+          if (_open) ...[
+            const SizedBox(height: 6),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: theme.colors.surfaceContainer.withValues(alpha: 0.45),
+                borderRadius: BorderRadius.circular(theme.chipRadius),
+                border: Border.all(color: theme.colors.hairlineSoft),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (final candidate in widget.candidates)
+                      _AddCandidateRow(
+                        candidate: candidate,
+                        onPressed: () {
+                          setState(() => _open = false);
+                          widget.state.addToZone(
+                            candidate.descriptor.id,
+                            zone: widget.zone,
+                            descriptors: widget.descriptors,
+                            defaultZone: candidate.descriptor.zone,
+                          );
+                        },
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _AddCandidateRow extends StatelessWidget {
+  const _AddCandidateRow({required this.candidate, required this.onPressed});
+
+  final NeoAddCandidate candidate;
+  final VoidCallback onPressed;
+
+  static const Map<NeoZone, String> _zoneLabels = <NeoZone, String>{
+    NeoZone.start: '左',
+    NeoZone.center: '中',
+    NeoZone.end: '右',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShellTheme.of(context);
+    final from = candidate.currentZone;
+    final hint = switch (candidate.effect) {
+      NeoAddEffect.add => '添加',
+      NeoAddEffect.move => '从${from == null ? '别处' : _zoneLabels[from]}移过来',
+    };
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onPressed,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 7),
+          child: Row(
+            children: [
+              Icon(Icons.add_circle_outline, size: 15, color: theme.accent),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Text(
+                  candidate.descriptor.label,
+                  style: theme.text.systemBarValue.copyWith(fontSize: 13),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                hint,
+                style: theme.text.systemBarCaption.copyWith(
+                  fontSize: 11.5,
+                  color: theme.colors.textTertiary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The chevron that opens a module's own settings.
 class _ExpanderButton extends StatelessWidget {
   const _ExpanderButton({
     required this.expanded,
@@ -475,6 +705,9 @@ class _ExpanderButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShellTheme.of(context);
+    // Accent when open, and when there is something to open: a module with
+    // settings marks its own expander so the place to look is visible without
+    // opening every card.
     final color = expanded || highlighted
         ? theme.accent
         : theme.colors.textTertiary;
@@ -524,6 +757,54 @@ class _ExpanderButton extends StatelessWidget {
   }
 }
 
+/// A wide outlined button, used for the per-zone add action.
+class _OutlineButton extends StatelessWidget {
+  const _OutlineButton({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShellTheme.of(context);
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onPressed,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(theme.chipRadius),
+            border: Border.all(color: theme.colors.hairline),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: 16, color: theme.colors.textSecondary),
+                const SizedBox(width: 6),
+                Text(
+                  label,
+                  style: theme.text.systemBarCaption.copyWith(
+                    fontSize: 12,
+                    color: theme.colors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Bar-wide spacing control.
 class _DensityRow extends StatelessWidget {
   const _DensityRow({required this.state});
@@ -557,80 +838,7 @@ class _DensityRow extends StatelessWidget {
   }
 }
 
-/// One reorder step. A null [onPressed] disables it at a zone boundary, so the
-/// button never looks live when a move would do nothing.
-class _MoveButton extends StatelessWidget {
-  const _MoveButton({
-    required this.icon,
-    required this.tooltip,
-    required this.onPressed,
-  });
-
-  final IconData icon;
-  final String tooltip;
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = ShellTheme.of(context);
-    final enabled = onPressed != null;
-    return Semantics(
-      button: enabled,
-      enabled: enabled,
-      label: tooltip,
-      child: ExcludeSemantics(
-        child: MouseRegion(
-          cursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: onPressed,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: theme.colors.tileOff.withValues(
-                  alpha: enabled ? 1.0 : 0.45,
-                ),
-                borderRadius: BorderRadius.circular(theme.chipRadius),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 3),
-                child: Icon(
-                  icon,
-                  size: 18,
-                  color: enabled
-                      ? theme.colors.textPrimary
-                      : theme.colors.textTertiary,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ZoneSelector extends StatelessWidget {
-  const _ZoneSelector({required this.zone, required this.onChanged});
-
-  final NeoZone zone;
-  final ValueChanged<NeoZone> onChanged;
-
-  static const Map<NeoZone, String> _labels = <NeoZone, String>{
-    NeoZone.start: '左',
-    NeoZone.center: '中',
-    NeoZone.end: '右',
-  };
-
-  @override
-  Widget build(BuildContext context) => _Segmented<NeoZone>(
-    values: _labels,
-    selected: zone,
-    onSelected: onChanged,
-  );
-}
-
-/// A small segmented control. Used for the per-module zone and the bar-wide
-/// spacing, so both stay visually identical.
+/// A small segmented control, used for the bar-wide spacing.
 class _Segmented<T> extends StatelessWidget {
   const _Segmented({
     required this.values,
