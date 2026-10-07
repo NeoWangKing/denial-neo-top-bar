@@ -24,11 +24,12 @@ import '../core/module_defaults.dart';
 import '../core/module_descriptor.dart';
 import '../widgets/neo_anchor.dart';
 import '../widgets/neo_card.dart';
+import '../widgets/neo_setting_controls.dart';
 import 'control_center_link.dart';
 import 'control_center_panel.dart';
 import 'control_center_volume.dart';
 
-class ControlCenterModule implements NeoModule {
+class ControlCenterModule implements NeoModule, NeoModuleSettings {
   const ControlCenterModule();
 
   @override
@@ -40,7 +41,122 @@ class ControlCenterModule implements NeoModule {
   @override
   Widget build(BuildContext context, NeoModuleContext module) =>
       _ControlCenterContent(module: module);
+
+  /// The first module with settings of its own, and the reason the settings card
+  /// grew an expandable area: which readouts the pill carries, and which session
+  /// buttons the panel's row offers.
+  ///
+  /// Both write `null` when the selection is back to the default, so a file that
+  /// has never been customised stays empty.
+  @override
+  Widget buildSettings(BuildContext context, NeoModuleSettingsScope scope) {
+    final options = neoControlCenterOptions(scope.options);
+    final glyphs = options.glyphs;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        NeoSettingGroup(
+          title: '胶囊上显示',
+          children: [
+            for (final glyph in neoPillGlyphOrder)
+              NeoSettingRow(
+                label: neoPillGlyphLabel(glyph),
+                description: neoPillGlyphDescription(glyph),
+                child: Builder(
+                  builder: (context) {
+                    final selected = glyphs.contains(glyph);
+                    // The last remaining readout cannot be switched off: an
+                    // empty pill reads as a broken one, not as a choice.
+                    final locked =
+                        selected && !neoCanDisableGlyph(glyphs, glyph);
+                    return NeoSettingToggle(
+                      value: selected,
+                      onChanged: locked
+                          ? null
+                          : (value) => scope.setOption(
+                              neoControlCenterGlyphsKey,
+                              _encodeGlyphs(glyphs, glyph, value),
+                            ),
+                      tooltip: locked ? '至少留一个，否则胶囊会是空白' : null,
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        NeoSettingGroup(
+          title: '电源按钮',
+          children: [
+            for (final action in NeoPowerAction.values)
+              NeoSettingRow(
+                label: neoPowerActionLabel(action),
+                description: _powerDescription(action),
+                child: NeoSettingToggle(
+                  value: options.powerActions.contains(action),
+                  onChanged: (value) => scope.setOption(
+                    neoControlCenterPowerKey,
+                    _encodePower(options.powerActions, action, value),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
 }
+
+/// The selection with [glyph] switched on or off, or null when it is the
+/// default again.
+List<String>? _encodeGlyphs(
+  Set<NeoPillGlyph> current,
+  NeoPillGlyph glyph,
+  bool value,
+) {
+  final next = <NeoPillGlyph>{...current};
+  if (value) {
+    next.add(glyph);
+  } else {
+    next.remove(glyph);
+  }
+  // Switching the last one off is refused by the settings UI, so a full
+  // selection is the default and can be dropped from the file again.
+  if (next.length == neoPillGlyphOrder.length) return null;
+  return <String>[
+    for (final candidate in neoPillGlyphOrder)
+      if (next.contains(candidate)) candidate.name,
+  ];
+}
+
+/// The power selection with [action] switched on or off, or null when it is the
+/// default row again.
+List<String>? _encodePower(
+  List<NeoPowerAction> current,
+  NeoPowerAction action,
+  bool value,
+) {
+  final next = <NeoPowerAction>{...current};
+  if (value) {
+    next.add(action);
+  } else {
+    next.remove(action);
+  }
+  if (next.length == neoPowerActionOrder.length) return null;
+  return <String>[
+    for (final candidate in neoPowerActionOrder)
+      if (next.contains(candidate)) candidate.name,
+  ];
+}
+
+String _powerDescription(NeoPowerAction action) => switch (action) {
+  NeoPowerAction.lock => '立即锁屏，不需要确认',
+  NeoPowerAction.logout => '注销当前会话，会先问一次',
+  NeoPowerAction.suspend => '睡眠，默认不在这一行里',
+  NeoPowerAction.hibernate => '休眠，默认不在这一行里',
+  NeoPowerAction.reboot => '重启，会先问一次',
+  NeoPowerAction.powerOff => '关机，会先问一次',
+};
 
 class _ControlCenterContent extends ConsumerWidget {
   const _ControlCenterContent({required this.module});
@@ -57,6 +173,8 @@ class _ControlCenterContent extends ConsumerWidget {
     final wired = ref.watch(neoWiredLinkProvider).value ?? false;
     final size = 16 * module.density.clamp(0.85, 1.15).toDouble();
     final gap = 7 * module.density;
+    // Which readouts the user kept, resolved from the module's own settings.
+    final selected = neoControlCenterOptions(module.options).glyphs;
 
     final glyph = theme.colors.textPrimary;
     final dim = theme.colors.glyphInactive;
@@ -75,45 +193,49 @@ class _ControlCenterContent extends ConsumerWidget {
     );
 
     final glyphs = <Widget>[
-      _StatusGlyph(
-        icon: switch (neoVolumeGlyphStep(volume.level, muted: volume.muted)) {
-          0 => Icons.volume_off,
-          1 => Icons.volume_mute,
-          2 => Icons.volume_down,
-          _ => Icons.volume_up,
-        },
-        size: size,
-        color: glyph,
-        tooltip: muted ? '音量（静音）· 右键取消静音' : '音量 · 右键静音',
-        onTap: openPanel,
-        onSecondary: ref.read(neoVolumeProvider.notifier).toggleMute,
-      ),
-      _StatusGlyph(
-        icon: switch (glyphState) {
-          NeoNetworkGlyph.ethernet => Icons.settings_ethernet,
-          NeoNetworkGlyph.wifi => Icons.wifi,
-          NeoNetworkGlyph.offline => Icons.wifi,
-          NeoNetworkGlyph.wifiOff => Icons.wifi_off,
-        },
-        size: size,
-        color: switch (glyphState) {
-          // A cable is as "connected" as a joined network; only the radio-off
-          // and radio-on-but-idle states are the quiet ones.
-          NeoNetworkGlyph.ethernet || NeoNetworkGlyph.wifi => glyph,
-          NeoNetworkGlyph.offline || NeoNetworkGlyph.wifiOff => dim,
-        },
-        tooltip: switch (glyphState) {
-          NeoNetworkGlyph.ethernet => '有线网络 · 右键开关无线',
-          NeoNetworkGlyph.wifi => 'Wi-Fi · 右键关闭无线',
-          NeoNetworkGlyph.offline => '无线未连接 · 右键关闭无线',
-          NeoNetworkGlyph.wifiOff => '无线已关闭 · 右键开启无线',
-        },
-        onTap: openPanel,
-        onSecondary: network.snapshot.wifiDeviceAvailable
-            ? ref.read(networkConnectivityProvider.notifier).toggleWireless
-            : null,
-      ),
-      if (bluetooth.powered && bluetooth.available)
+      if (selected.contains(NeoPillGlyph.volume))
+        _StatusGlyph(
+          icon: switch (neoVolumeGlyphStep(volume.level, muted: volume.muted)) {
+            0 => Icons.volume_off,
+            1 => Icons.volume_mute,
+            2 => Icons.volume_down,
+            _ => Icons.volume_up,
+          },
+          size: size,
+          color: glyph,
+          tooltip: muted ? '音量（静音）· 右键取消静音' : '音量 · 右键静音',
+          onTap: openPanel,
+          onSecondary: ref.read(neoVolumeProvider.notifier).toggleMute,
+        ),
+      if (selected.contains(NeoPillGlyph.network))
+        _StatusGlyph(
+          icon: switch (glyphState) {
+            NeoNetworkGlyph.ethernet => Icons.settings_ethernet,
+            NeoNetworkGlyph.wifi => Icons.wifi,
+            NeoNetworkGlyph.offline => Icons.wifi,
+            NeoNetworkGlyph.wifiOff => Icons.wifi_off,
+          },
+          size: size,
+          color: switch (glyphState) {
+            // A cable is as "connected" as a joined network; only the radio-off
+            // and radio-on-but-idle states are the quiet ones.
+            NeoNetworkGlyph.ethernet || NeoNetworkGlyph.wifi => glyph,
+            NeoNetworkGlyph.offline || NeoNetworkGlyph.wifiOff => dim,
+          },
+          tooltip: switch (glyphState) {
+            NeoNetworkGlyph.ethernet => '有线网络 · 右键开关无线',
+            NeoNetworkGlyph.wifi => 'Wi-Fi · 右键关闭无线',
+            NeoNetworkGlyph.offline => '无线未连接 · 右键关闭无线',
+            NeoNetworkGlyph.wifiOff => '无线已关闭 · 右键开启无线',
+          },
+          onTap: openPanel,
+          onSecondary: network.snapshot.wifiDeviceAvailable
+              ? ref.read(networkConnectivityProvider.notifier).toggleWireless
+              : null,
+        ),
+      if (selected.contains(NeoPillGlyph.bluetooth) &&
+          bluetooth.powered &&
+          bluetooth.available)
         _StatusGlyph(
           icon: bluetooth.devices.any((device) => device.connected)
               ? Icons.bluetooth_connected
@@ -124,17 +246,18 @@ class _ControlCenterContent extends ConsumerWidget {
           onTap: openPanel,
           onSecondary: ref.read(bluetoothProvider.notifier).togglePower,
         ),
-      if (battery.capacity case final capacity?)
-        _StatusGlyph(
-          icon: null,
-          label: '$capacity%',
-          size: size,
-          color: battery.charging ? theme.accent : glyph,
-          tooltip: '电量 $capacity%',
-          // No secondary action: there is no "toggle the battery", and inventing
-          // one would only misfire.
-          onTap: openPanel,
-        ),
+      if (selected.contains(NeoPillGlyph.battery))
+        if (battery.capacity case final capacity?)
+          _StatusGlyph(
+            icon: null,
+            label: '$capacity%',
+            size: size,
+            color: battery.charging ? theme.accent : glyph,
+            tooltip: '电量 $capacity%',
+            // No secondary action: there is no "toggle the battery", and inventing
+            // one would only misfire.
+            onTap: openPanel,
+          ),
     ];
 
     return NeoCardButton(

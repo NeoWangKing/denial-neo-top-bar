@@ -26,6 +26,59 @@ abstract interface class NeoModule {
   Widget build(BuildContext context, NeoModuleContext module);
 }
 
+/// A module that has settings of its own.
+///
+/// Kept as a separate capability rather than a member of [NeoModule]: the bar
+/// only ever builds pills, and most modules have nothing to configure. A module
+/// that does implement this is a `NeoModuleSettings`, and the settings panel
+/// gives it an inset area under its row.
+///
+/// The panel owns the row, the expander, the zone selector and the reorder
+/// buttons; the module only describes the part that is genuinely its own. The
+/// returned widget is laid out inside a horizontal-stretching [Column], so a
+/// module can return a plain column of rows.
+abstract interface class NeoModuleSettings {
+  Widget buildSettings(BuildContext context, NeoModuleSettingsScope scope);
+}
+
+/// What a module needs in order to build its own settings.
+///
+/// A separate type from [NeoModuleContext] on purpose: the bar builds pills with
+/// a context that carries no writer, and settings are the one place a module may
+/// change something. Handing the pill a writer it must not use would be a
+/// standing invitation to mutate the configuration from `build`.
+class NeoModuleSettingsScope {
+  const NeoModuleSettingsScope({
+    required this.services,
+    required this.monitorId,
+    required this.options,
+    required this.setOption,
+  });
+
+  /// Host services, for the same reason a pill gets them: a setting may need to
+  /// list displays or ask the host a question.
+  final ShellServices services;
+
+  /// Output whose bar these settings belong to.
+  final int monitorId;
+
+  /// The module's stored settings; empty when the user never changed any.
+  final Map<String, Object?> options;
+
+  /// Writes a setting, or removes it when [value] is null. Persisting is the
+  /// caller's job; a module just says what changed.
+  final void Function(String key, Object? value) setOption;
+
+  /// One setting read as a bool, falling back when absent or of another type.
+  ///
+  /// Settings live in a JSON file a user may hand-edit, so every read has to
+  /// tolerate a value of the wrong shape rather than throw inside `build`.
+  bool boolOption(String key, {required bool fallback}) {
+    final value = options[key];
+    return value is bool ? value : fallback;
+  }
+}
+
 /// Per-bar-instance facts shared by every module of one output.
 ///
 /// This deliberately carries no [BuildContext]: the context belongs to the
@@ -38,6 +91,7 @@ class NeoModuleContext {
     required this.side,
     required this.accent,
     required this.density,
+    this.options = const <String, Object?>{},
   });
 
   final ShellServices services;
@@ -54,6 +108,22 @@ class NeoModuleContext {
 
   /// Multiplier applied to card padding and gaps.
   final double density;
+
+  /// This module's stored settings, as the user left them.
+  ///
+  /// Part of the context rather than a separate lookup so a pill renders from the
+  /// same configuration the settings panel edits, and so the bar's module cache
+  /// can tell when a setting changed.
+  final Map<String, Object?> options;
+
+  /// A stable identity for the settings, usable in the bar's module cache key.
+  ///
+  /// `Object.hash` on the map itself would be identity-based, because `Map` does
+  /// not override `hashCode`; every rebuild would then look like a change and
+  /// the cache would never hit.
+  Object get optionsFingerprint => Object.hashAll(<Object>[
+    for (final entry in options.entries) Object.hash(entry.key, entry.value),
+  ]);
 
   bool get horizontal => side.isHorizontal;
 

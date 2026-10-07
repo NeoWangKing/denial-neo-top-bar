@@ -265,6 +265,87 @@ void main() {
     });
   });
 
+  group('per-module settings', () {
+    test('round-trips through JSON', () {
+      final config = NeoTopBarConfig.empty.withOption(
+        'control_center',
+        'glyphs',
+        <String>['volume', 'battery'],
+      );
+      final restored = NeoTopBarConfig.fromJson(config.toJson());
+      expect(restored.optionsOf('control_center'), <String, Object?>{
+        'glyphs': <String>['volume', 'battery'],
+      });
+    });
+
+    test('a module with only settings still gets an entry', () {
+      final config = NeoTopBarConfig.empty.withOption('clock', 'format', '24h');
+      expect(config.modules.containsKey('clock'), isTrue);
+      expect(config.isEnabled(clockModule), isTrue);
+      expect(config.zoneOf(clockModule), NeoZone.end);
+    });
+
+    test('clearing the last setting drops the whole entry', () {
+      final withOption = NeoTopBarConfig.empty.withOption(
+        'clock',
+        'format',
+        '24h',
+      );
+      final cleared = withOption.withOption('clock', 'format', null);
+      expect(cleared.modules, isEmpty);
+      expect(cleared.optionsOf('clock'), isEmpty);
+    });
+
+    test('toggling a module keeps its zone and its settings', () {
+      // Regression guard: the config state used to build a fresh preference from
+      // scratch, which silently forgot the zone the user had chosen and would
+      // now forget every module-specific setting as well.
+      final moved = NeoTopBarConfig.empty
+          .withPreference('clock', NeoModulePreference(zone: NeoZone.start))
+          .withOption('clock', 'format', '24h');
+      final toggled = moved.withPreference(
+        'clock',
+        moved.modules['clock']!.withEnabled(false),
+      );
+      expect(toggled.zoneOf(clockModule), NeoZone.start);
+      expect(toggled.optionsOf('clock'), <String, Object?>{'format': '24h'});
+      expect(toggled.isEnabled(clockModule), isFalse);
+    });
+
+    test('moving a module keeps its settings', () {
+      final moved = NeoTopBarConfig.empty
+          .withOption('clock', 'format', '24h')
+          .withPreference(
+            'clock',
+            (NeoTopBarConfig.empty
+                    .withOption('clock', 'format', '24h')
+                    .modules['clock'])!
+                .withZone(NeoZone.start),
+          );
+      expect(moved.optionsOf('clock'), <String, Object?>{'format': '24h'});
+      expect(moved.zoneOf(clockModule), NeoZone.start);
+    });
+
+    test('drops values a JSON file could not round-trip', () {
+      final restored = NeoTopBarConfig.fromJson(<String, Object?>{
+        'schema': 1,
+        'modules': <String, Object?>{
+          'clock': <String, Object?>{
+            'options': <String, Object?>{
+              'format': '24h',
+              'broken': Object(),
+              'nested': <String, Object?>{'ok': true, 'broken': Object()},
+            },
+          },
+        },
+      });
+      // The whole value is dropped rather than partly repaired: a module should
+      // never be handed a half-filtered structure that nothing could have
+      // written, and the option falls back to its default instead.
+      expect(restored.optionsOf('clock'), <String, Object?>{'format': '24h'});
+    });
+  });
+
   group('prune', () {
     test('drops ids the current build does not know', () {
       final config = NeoTopBarConfig(

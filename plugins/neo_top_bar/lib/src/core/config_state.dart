@@ -55,8 +55,18 @@ class NeoTopBarConfigState extends ChangeNotifier {
 
   /// Enables or disables one module and persists the result.
   Future<void> setEnabled(String id, {required bool enabled}) => _update(
-    _config.withPreference(id, NeoModulePreference(enabled: enabled)),
+    _config.withPreference(
+      id,
+      (_config.modules[id] ?? NeoModulePreference()).withEnabled(enabled),
+    ),
   );
+
+  /// Changes one of a module's own settings and persists the result.
+  ///
+  /// The value is stored opaquely; only the module knows what it means. Passing
+  /// null removes the setting so the module falls back to its default.
+  Future<void> setOption(String id, String key, Object? value) =>
+      _update(_config.withOption(id, key, value));
 
   /// Moves one module to another zone and persists the result.
   Future<void> setZone(
@@ -64,15 +74,14 @@ class NeoTopBarConfigState extends ChangeNotifier {
     required NeoZone zone,
     NeoZone? defaultZone,
   }) {
-    final preference = _config.modules[id];
+    // Storing the default zone as an explicit value is harmless but makes the
+    // file drift; drop the override when it matches the default. The module's
+    // own settings and its enabled flag ride along untouched.
     return _update(
       _config.withPreference(
         id,
-        NeoModulePreference(
-          enabled: preference?.enabled,
-          // Storing the default zone as an explicit value is harmless but makes
-          // the file drift; drop the override when it matches the default.
-          zone: zone == defaultZone ? null : zone,
+        (_config.modules[id] ?? NeoModulePreference()).withZone(
+          zone == defaultZone ? null : zone,
         ),
       ),
     );

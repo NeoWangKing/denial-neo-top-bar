@@ -60,6 +60,7 @@ void openControlCenterPanel({
         builder: (_, handle) => NeoControlCenterPanel(
           services: module.services,
           monitorId: module.monitorId,
+          options: module.options,
           anchor: anchor,
           onClose: handle.close,
         ),
@@ -73,6 +74,7 @@ class NeoControlCenterPanel extends ConsumerStatefulWidget {
   const NeoControlCenterPanel({
     required this.services,
     required this.monitorId,
+    required this.options,
     required this.anchor,
     required this.onClose,
     super.key,
@@ -80,6 +82,9 @@ class NeoControlCenterPanel extends ConsumerStatefulWidget {
 
   final ShellServices services;
   final int monitorId;
+
+  /// The module's own settings, so the panel renders the row the user chose.
+  final Map<String, Object?> options;
 
   /// Scene-space rectangle of the pill that opened this panel.
   final Rect? anchor;
@@ -136,6 +141,8 @@ class _NeoControlCenterPanelState extends ConsumerState<NeoControlCenterPanel> {
         : appearance.colorSchemePreference.effectiveBrightness ==
               Brightness.dark;
     final themeMode = neoThemeMode(isDark: dark);
+    // Which session buttons this row offers is the module's own setting.
+    final powerActions = neoControlCenterOptions(widget.options).powerActions;
     // Which setting the tap has to write is a rule, not an implementation
     // detail: see `neoThemeToggle` and its tests.
     final themeToggle = neoThemeToggle(
@@ -305,6 +312,7 @@ class _NeoControlCenterPanelState extends ConsumerState<NeoControlCenterPanel> {
               const SizedBox(height: 10),
             ],
             _PowerRow(
+              actions: powerActions,
               busy: power.busy,
               onCustomise: () {
                 // Close first: the settings card is a popup of its own, and
@@ -1549,12 +1557,16 @@ class _PairingPrompt extends ConsumerWidget {
 /// The session actions, with the ones that can lose work marked as such.
 class _PowerRow extends StatelessWidget {
   const _PowerRow({
+    required this.actions,
     required this.onTap,
     required this.available,
     required this.blockedReason,
     required this.busy,
     required this.onCustomise,
   });
+
+  /// The session buttons to show, in canonical order.
+  final List<NeoPowerAction> actions;
 
   final ValueChanged<NeoPowerAction> onTap;
   final bool Function(NeoPowerAction action) available;
@@ -1576,7 +1588,7 @@ class _PowerRow extends StatelessWidget {
           color: theme.colors.textSecondary,
           onPressed: onCustomise,
         ),
-        for (final action in neoPowerActionOrder)
+        for (final action in actions)
           _PowerButton(
             action: action,
             enabled: !busy && available(action),

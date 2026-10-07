@@ -435,6 +435,116 @@ double neoVolumeAfterMuteToggle({
   return restore;
 }
 
+/// The readouts the control centre pill can show.
+enum NeoPillGlyph { volume, network, bluetooth, battery }
+
+/// The order the pill lays them out in, independent of what is selected.
+const List<NeoPillGlyph> neoPillGlyphOrder = <NeoPillGlyph>[
+  NeoPillGlyph.volume,
+  NeoPillGlyph.network,
+  NeoPillGlyph.bluetooth,
+  NeoPillGlyph.battery,
+];
+
+String neoPillGlyphLabel(NeoPillGlyph glyph) => switch (glyph) {
+  NeoPillGlyph.volume => '音量',
+  NeoPillGlyph.network => '网络',
+  NeoPillGlyph.bluetooth => '蓝牙',
+  NeoPillGlyph.battery => '电量',
+};
+
+String neoPillGlyphDescription(NeoPillGlyph glyph) => switch (glyph) {
+  NeoPillGlyph.volume => '扬声器图标，点开面板，右键静音',
+  NeoPillGlyph.network => 'Wi-Fi 或有线图标，右键开关无线',
+  NeoPillGlyph.bluetooth => '适配器开启时才出现，右键开关蓝牙',
+  NeoPillGlyph.battery => '电量百分比，没有电池的机器不显示',
+};
+
+/// The control centre's stored settings, resolved against their defaults.
+class NeoControlCenterOptions {
+  NeoControlCenterOptions({
+    required Set<NeoPillGlyph> glyphs,
+    required List<NeoPowerAction> powerActions,
+  }) : glyphs = Set<NeoPillGlyph>.unmodifiable(glyphs),
+       powerActions = List<NeoPowerAction>.unmodifiable(powerActions);
+
+  /// Pill readouts, in [neoPillGlyphOrder] order.
+  final Set<NeoPillGlyph> glyphs;
+
+  /// Session buttons for the power row, in [neoPowerActionOrder] order.
+  final List<NeoPowerAction> powerActions;
+
+  bool get isDefault =>
+      glyphs.length == neoPillGlyphOrder.length &&
+      _sameActions(powerActions, neoPowerActionOrder);
+}
+
+/// The option key holding the selected [NeoPillGlyph]s.
+const String neoControlCenterGlyphsKey = 'glyphs';
+
+/// The option key holding the selected [NeoPowerAction]s.
+const String neoControlCenterPowerKey = 'power';
+
+/// Resolves the stored settings, tolerating anything a hand-edited file holds.
+///
+/// Two asymmetries, both deliberate:
+///
+/// - an **empty glyph selection** falls back to showing everything, because a
+///   bar pill with nothing in it is indistinguishable from a broken one, and the
+///   settings UI refuses to empty it anyway;
+/// - an **empty power selection** is honoured, because a row of no buttons is a
+///   legitimate preference and the pencil still opens this card.
+NeoControlCenterOptions neoControlCenterOptions(Map<String, Object?> options) {
+  final storedGlyphs = options[neoControlCenterGlyphsKey];
+  final glyphs = <NeoPillGlyph>{};
+  if (storedGlyphs is List) {
+    for (final value in storedGlyphs) {
+      if (value is! String) continue;
+      for (final glyph in NeoPillGlyph.values) {
+        if (glyph.name == value) glyphs.add(glyph);
+      }
+    }
+  }
+  if (glyphs.isEmpty) glyphs.addAll(neoPillGlyphOrder);
+
+  final storedPower = options[neoControlCenterPowerKey];
+  final selected = <NeoPowerAction>{};
+  if (storedPower is List) {
+    for (final value in storedPower) {
+      if (value is! String) continue;
+      for (final action in NeoPowerAction.values) {
+        if (action.name == value) selected.add(action);
+      }
+    }
+  } else {
+    // Absent means "never configured", which is the default row; an explicit
+    // empty list means "no session buttons" and stays empty.
+    selected.addAll(neoPowerActionOrder);
+  }
+  // Always render in the canonical order, so a hand-edited file cannot put
+  // "power off" before "lock" and turn a mis-click into a shutdown.
+  final actions = <NeoPowerAction>[
+    for (final action in neoPowerActionOrder)
+      if (selected.contains(action)) action,
+  ];
+  return NeoControlCenterOptions(glyphs: glyphs, powerActions: actions);
+}
+
+bool _sameActions(List<NeoPowerAction> left, List<NeoPowerAction> right) {
+  if (left.length != right.length) return false;
+  for (var index = 0; index < left.length; index++) {
+    if (left[index] != right[index]) return false;
+  }
+  return true;
+}
+
+/// Whether a glyph may be turned off without emptying the pill.
+///
+/// The settings panel greys the last remaining switch instead of letting the
+/// user produce a pill that shows nothing.
+bool neoCanDisableGlyph(Set<NeoPillGlyph> selected, NeoPillGlyph glyph) =>
+    selected.contains(glyph) && selected.length > 1;
+
 /// Volume glyph steps, so the pill does not need a bool ladder in the widget.
 int neoVolumeGlyphStep(double level, {bool muted = false}) {
   if (muted || level <= 0.0) return 0;

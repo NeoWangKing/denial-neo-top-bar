@@ -39,7 +39,11 @@ enum NeoDensity {
 
 /// One module's user decision.
 class NeoModulePreference {
-  const NeoModulePreference({this.enabled, this.zone});
+  const NeoModulePreference({
+    this.enabled,
+    this.zone,
+    this.options = const <String, Object?>{},
+  });
 
   /// Null means "use the descriptor default".
   final bool? enabled;
@@ -47,22 +51,92 @@ class NeoModulePreference {
   /// Null means "use the descriptor zone".
   final NeoZone? zone;
 
-  bool get isEmpty => enabled == null && zone == null;
+  /// Module-specific settings, keyed by a name the module itself defines.
+  ///
+  /// Deliberately opaque here: the config layer stores and prunes what a module
+  /// asks it to store and never interprets the values. A module that grows a
+  /// setting therefore does not need a config schema change, and an option left
+  /// behind by an older build is harmless — the module simply reads a value it
+  /// does not know and ignores it.
+  final Map<String, Object?> options;
+
+  bool get isEmpty => enabled == null && zone == null && options.isEmpty;
+
+  /// This preference with the enabled flag replaced, keeping everything else.
+  ///
+  /// Every mutator goes through one of these two, because building a fresh
+  /// `NeoModulePreference` from scratch silently drops the fields the caller did
+  /// not mention: toggling a module used to forget the zone the user had moved
+  /// it to, and would now forget its own settings as well.
+  NeoModulePreference withEnabled(bool value) =>
+      NeoModulePreference(enabled: value, zone: zone, options: options);
+
+  /// This preference with the zone replaced, keeping everything else.
+  NeoModulePreference withZone(NeoZone? value) =>
+      NeoModulePreference(enabled: enabled, zone: value, options: options);
+
+  /// This preference with [key] set to [value], or removed when null.
+  NeoModulePreference withOption(String key, Object? value) {
+    final next = Map<String, Object?>.of(options);
+    if (value == null) {
+      next.remove(key);
+    } else {
+      next[key] = value;
+    }
+    return NeoModulePreference(
+      enabled: enabled,
+      zone: zone,
+      // Frozen so nothing can reach into a preference and edit it in place; the
+      // const constructor cannot do this itself, which is why only the mutators
+      // go through here.
+      options: Map<String, Object?>.unmodifiable(next),
+    );
+  }
 
   Map<String, Object?> toJson() => <String, Object?>{
     if (enabled != null) 'enabled': enabled,
     if (zone != null) 'zone': zone!.name,
+    if (options.isNotEmpty)
+      'options': <String, Object?>{
+        for (final entry in options.entries)
+          if (entry.value != null) entry.key: entry.value,
+      },
   };
 
   static NeoModulePreference fromJson(Object? value) {
-    if (value is! Map) return const NeoModulePreference();
+    if (value is! Map) return NeoModulePreference();
     final enabled = value['enabled'];
+    final options = <String, Object?>{};
+    if (value['options'] case final Map<Object?, Object?> raw) {
+      for (final entry in raw.entries) {
+        final key = entry.key;
+        // Only JSON-shaped values are kept, so a hand-edited file cannot put a
+        // value in here that the writer could not write back out. A value that
+        // fails the check is dropped whole rather than partly repaired: a
+        // module should never receive a half-filtered structure no writer could
+        // have produced.
+        if (key is! String || key.isEmpty) continue;
+        if (!_isJsonValue(entry.value)) continue;
+        options[key] = entry.value;
+      }
+    }
     return NeoModulePreference(
       enabled: enabled is bool ? enabled : null,
       zone: NeoZone.parse(value['zone']),
+      options: options,
     );
   }
 }
+
+/// Whether [value] is something [NeoModulePreference.toJson] can round-trip.
+bool _isJsonValue(Object? value) => switch (value) {
+  null || bool() || num() || String() => true,
+  List<Object?>() => value.every(_isJsonValue),
+  Map<Object?, Object?>() => value.entries.every(
+    (entry) => entry.key is String && _isJsonValue(entry.value),
+  ),
+  _ => false,
+};
 
 /// The complete persisted configuration.
 class NeoTopBarConfig {
@@ -120,6 +194,18 @@ class NeoTopBarConfig {
   /// Effective zone for [descriptor].
   NeoZone zoneOf(NeoModuleDescriptor descriptor) =>
       modules[descriptor.id]?.zone ?? descriptor.zone;
+
+  /// Stored settings for [id]; empty when the user never changed any.
+  Map<String, Object?> optionsOf(String id) =>
+      modules[id]?.options ?? const <String, Object?>{};
+
+  /// Sets one of [id]'s own settings, dropping the entry entirely when nothing
+  /// is left to store so the file does not accumulate empty objects.
+  NeoTopBarConfig withOption(String id, String key, Object? value) =>
+      withPreference(
+        id,
+        (modules[id] ?? NeoModulePreference()).withOption(key, value),
+      );
 
   Map<String, Object?> toJson() => <String, Object?>{
     'schema': schema,

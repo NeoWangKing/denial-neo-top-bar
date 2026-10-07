@@ -284,12 +284,22 @@ class _BarContentState extends State<_BarContent>
     super.dispose();
   }
 
-  NeoModuleContext get _moduleContext => NeoModuleContext(
+  /// The shared half of a module's context, without its own settings.
+  ///
+  /// Used where a module's options are irrelevant — availability, the drag
+  /// preview's bookkeeping — while [_moduleContextFor] adds them for the one
+  /// call that actually renders a pill.
+  NeoModuleContext get _moduleContext => _moduleContextFor(null);
+
+  NeoModuleContext _moduleContextFor(String? id) => NeoModuleContext(
     services: widget.services,
     monitorId: widget.monitorId,
     side: widget.side,
     accent: widget.accent,
     density: widget.state.config.density.scale,
+    options: id == null
+        ? const <String, Object?>{}
+        : widget.state.config.optionsOf(id),
   );
 
   GlobalKey _keyFor(String id) =>
@@ -304,17 +314,15 @@ class _BarContentState extends State<_BarContent>
   Map<String, Widget> _moduleCache = const <String, Widget>{};
   int? _moduleCacheKey;
 
-  Widget _module(
-    BuildContext context,
-    NeoModuleContext moduleContext,
-    String id,
-  ) {
+  Widget _module(BuildContext context, String id) {
+    final moduleContext = _moduleContextFor(id);
     final key = Object.hash(
       moduleContext.services,
       moduleContext.monitorId,
       moduleContext.side,
       moduleContext.accent,
       moduleContext.density,
+      moduleContext.optionsFingerprint,
     );
     if (_moduleCacheKey != key) {
       _moduleCacheKey = key;
@@ -587,7 +595,6 @@ class _BarContentState extends State<_BarContent>
               theme: theme,
               size: size,
               boxes: boxes,
-              moduleContext: moduleContext,
               density: density,
             );
           }
@@ -596,7 +603,6 @@ class _BarContentState extends State<_BarContent>
             theme: theme,
             horizontal: horizontal,
             density: density,
-            moduleContext: moduleContext,
             visible: visible,
           );
         },
@@ -681,7 +687,6 @@ class _BarContentState extends State<_BarContent>
     required ShellThemeData theme,
     required Size size,
     required List<NeoPillBox> boxes,
-    required NeoModuleContext moduleContext,
     required double density,
   }) {
     final horizontal = _horizontal;
@@ -747,7 +752,7 @@ class _BarContentState extends State<_BarContent>
             onDragUpdate: _updateDrag,
             onDragEnd: _endDrag,
             onDragCancel: _clearDrag,
-            child: _module(context, moduleContext, id),
+            child: _module(context, id),
           ),
         ),
       );
@@ -787,7 +792,6 @@ class _BarContentState extends State<_BarContent>
     required ShellThemeData theme,
     required bool horizontal,
     required double density,
-    required NeoModuleContext moduleContext,
     required List<NeoModulePlacement> visible,
   }) {
     final zones = <NeoZone, List<Widget>>{};
@@ -806,7 +810,7 @@ class _BarContentState extends State<_BarContent>
             onDragUpdate: _updateDrag,
             onDragEnd: _endDrag,
             onDragCancel: _clearDrag,
-            child: _module(context, moduleContext, id),
+            child: _module(context, id),
           ),
         ),
       );

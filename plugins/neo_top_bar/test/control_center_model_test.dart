@@ -415,6 +415,94 @@ void main() {
     });
   });
 
+  group('neoControlCenterOptions', () {
+    test(
+      'an untouched configuration shows and offers everything by default',
+      () {
+        final options = neoControlCenterOptions(const <String, Object?>{});
+        expect(options.glyphs, neoPillGlyphOrder.toSet());
+        expect(options.powerActions, neoPowerActionOrder);
+        expect(options.isDefault, isTrue);
+      },
+    );
+
+    test('a stored selection is honoured in canonical order', () {
+      final options = neoControlCenterOptions(<String, Object?>{
+        'glyphs': <String>['battery', 'volume'],
+        'power': <String>['powerOff', 'lock'],
+      });
+      expect(options.glyphs, <NeoPillGlyph>{
+        NeoPillGlyph.volume,
+        NeoPillGlyph.battery,
+      });
+      // Power off cannot be hoisted above lock by editing the file: a mis-click
+      // must not become a shutdown.
+      expect(options.powerActions, <NeoPowerAction>[
+        NeoPowerAction.lock,
+        NeoPowerAction.powerOff,
+      ]);
+    });
+
+    test('unknown names are ignored, not treated as an error', () {
+      final options = neoControlCenterOptions(<String, Object?>{
+        'glyphs': <String>['volume', 'teleporter', 'network'],
+        'power': <String>['lock', 'selfDestruct'],
+      });
+      expect(options.glyphs, <NeoPillGlyph>{
+        NeoPillGlyph.volume,
+        NeoPillGlyph.network,
+      });
+      expect(options.powerActions, <NeoPowerAction>[NeoPowerAction.lock]);
+    });
+
+    test('values of the wrong shape fall back rather than throw', () {
+      final options = neoControlCenterOptions(<String, Object?>{
+        'glyphs': 'volume',
+        'power': 7,
+      });
+      expect(options.glyphs, neoPillGlyphOrder.toSet());
+      expect(options.powerActions, neoPowerActionOrder);
+    });
+
+    test('an emptied power row is a choice, an emptied pill is not', () {
+      expect(
+        neoControlCenterOptions(<String, Object?>{'power': <String>[]})
+            .powerActions,
+        isEmpty,
+      );
+      expect(
+        neoControlCenterOptions(<String, Object?>{'glyphs': <String>[]}).glyphs,
+        neoPillGlyphOrder.toSet(),
+      );
+    });
+
+    test('every glyph has a label and a description', () {
+      for (final glyph in NeoPillGlyph.values) {
+        expect(neoPillGlyphLabel(glyph), isNotEmpty);
+        expect(neoPillGlyphDescription(glyph), isNotEmpty);
+      }
+    });
+
+    test('the last remaining glyph cannot be switched off', () {
+      expect(
+        neoCanDisableGlyph(<NeoPillGlyph>{
+          NeoPillGlyph.volume,
+        }, NeoPillGlyph.volume),
+        isFalse,
+      );
+      expect(
+        neoCanDisableGlyph(neoPillGlyphOrder.toSet(), NeoPillGlyph.volume),
+        isTrue,
+      );
+      expect(
+        neoCanDisableGlyph(<NeoPillGlyph>{
+          NeoPillGlyph.volume,
+        }, NeoPillGlyph.network),
+        isFalse,
+      );
+    });
+  });
+
   group('labels', () {
     test('volume reads as a percentage, or as muted at zero', () {
       expect(neoVolumeLabel(0.42), '42%');
