@@ -202,6 +202,7 @@ void main() {
         'battery',
         'cpu',
         'gpu',
+        'control_center',
         'clock',
       ]);
       expect(
@@ -214,6 +215,7 @@ void main() {
           'tray',
           'notifications',
           'battery',
+          'control_center',
           'clock',
         ],
       );
@@ -252,6 +254,7 @@ void main() {
         NeoModuleIds.battery,
         NeoModuleIds.cpu,
         NeoModuleIds.gpu,
+        NeoModuleIds.controlCenter,
         NeoModuleIds.clock,
       ];
       expect(declared.toSet(), hasLength(declared.length));
@@ -358,7 +361,7 @@ void main() {
     test('materializes the effective order on the first move', () {
       // Nothing was ever ordered, so a move must derive the starting list from
       // the registry defaults before swapping anything. Default end-zone order:
-      // tray, notifications, media, battery, cpu, gpu, clock.
+      // tray, notifications, media, battery, cpu, gpu, control centre, clock.
       final moved = moveModuleInZone(
         config: NeoTopBarConfig.empty,
         descriptors: neoTopBarDefaultModules,
@@ -372,6 +375,7 @@ void main() {
         NeoModuleIds.media,
         NeoModuleIds.cpu,
         NeoModuleIds.gpu,
+        NeoModuleIds.controlCenter,
         NeoModuleIds.clock,
       ]);
     });
@@ -438,6 +442,7 @@ void main() {
         NeoModuleIds.battery,
         NeoModuleIds.cpu,
         NeoModuleIds.gpu,
+        NeoModuleIds.controlCenter,
         NeoModuleIds.clock,
       ]);
     });
@@ -511,6 +516,7 @@ void main() {
         NeoModuleIds.battery,
         NeoModuleIds.cpu,
         NeoModuleIds.gpu,
+        NeoModuleIds.controlCenter,
         NeoModuleIds.clock,
       });
     });

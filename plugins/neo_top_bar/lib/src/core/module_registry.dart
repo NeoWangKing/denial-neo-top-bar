@@ -15,6 +15,7 @@ import 'module_defaults.dart';
 import 'module_descriptor.dart';
 import '../modules/battery_module.dart';
 import '../modules/clock_module.dart';
+import '../modules/control_center_module.dart';
 import '../modules/launcher_module.dart';
 import '../modules/load_module.dart';
 import '../modules/media_module.dart';
@@ -35,6 +36,7 @@ abstract final class NeoTopBarModules {
     NeoModuleIds.battery: BatteryModule(),
     NeoModuleIds.cpu: CpuModule(),
     NeoModuleIds.gpu: GpuModule(),
+    NeoModuleIds.controlCenter: ControlCenterModule(),
     NeoModuleIds.clock: ClockModule(),
   };
 

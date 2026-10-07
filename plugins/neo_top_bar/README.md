@@ -21,6 +21,7 @@
 | 通知 | `notifications` | 右 | 开 | 未读徽章 + 历史面板（逐条忽略 / 全部清除 / 免打扰） |
 | 媒体播放 | `media` | 右 | **关** | 曲目 + 上一首 / 播放暂停 / 下一首；无播放时自动消失（不留空位、不留间隙） |
 | 电池与电源 | `battery` | 右 | 开 | 电量与充电状态，点击打开电源设置；无电池的机器自动消失 |
+| 控制中心 | `control_center` | 右 | 开 | 胶囊上实时显示音量 / 网络 / 蓝牙 / 电量，点击在下方弹出面板：音量与亮度滑条、Wi-Fi 与蓝牙（可展开设备列表）、免打扰、深浅模式、锁屏 / 睡眠 / 休眠 / 注销 / 重启 / 关机 |
 | CPU 负载 | `cpu` | 右 | **关** | 折线 + 百分比 + 温度 |
 | GPU 负载 | `gpu` | 右 | **关** | 每块显卡一条，含温度 |
 | 时钟与日期 | `clock` | 右 | 开 | 点击打开日历面板（上/下月、回到今天） |
@@ -29,7 +30,7 @@
 
 ## 交互
 
-- **左键**：模块各自的行为（切工作区、开启动器、开电源页、开日历、开通知面板、媒体控制）。
+- **左键**：模块各自的行为（切工作区、开启动器、开电源页、开日历、开通知面板、开控制中心、媒体控制）。
 - **长按胶囊拖动**：直接在顶栏上拖拽排序。
   - 跟着指针走的是**胶囊本体**，不是替代图标
   - 它原本的位置留一个同尺寸的**虚影**（强调色描边的圆角矩形），标出它会落在哪
@@ -161,6 +162,7 @@ DENIAL_PLUGIN_DART="$(command -v dart)"
 "$DENIAL_PLUGIN_DART" --packages=.dart_tool/package_config.json test/popup_geometry_test.dart
 "$DENIAL_PLUGIN_DART" --packages=.dart_tool/package_config.json test/preferences_test.dart
 "$DENIAL_PLUGIN_DART" --packages=.dart_tool/package_config.json test/window_order_test.dart
+"$DENIAL_PLUGIN_DART" --packages=.dart_tool/package_config.json test/control_center_model_test.dart
 ```
 
 ## 代码结构
@@ -171,7 +173,7 @@ lib/
   neo_top_bar_logic.dart    纯 Dart 导出，供测试使用（不引 Flutter widget）
   src/core/
     module_descriptor.dart  模块身份类型（id / 标签 / 区 / 优先级 / 默认开关）
-    module_defaults.dart    ★ 默认布局的唯一来源：id 字符串 + 9 个描述符常量
+    module_defaults.dart    ★ 默认布局的唯一来源：id 字符串 + 10 个描述符常量
     module.dart             模块契约 + NeoModuleContext
     module_registry.dart    注册表：描述符 id → 实现，`all` 由默认常量派生
     config.dart             配置模型、JSON 解析、区/排序解析（NeoDensity）
@@ -181,6 +183,7 @@ lib/
     bar_drag_layout.dart    三个区的几何：显式坐标 / 拖动预览共用
     popup_geometry.dart     面板锚定几何（不引 dart:ui，可单测）
     window_order.dart       启动器窗口图标的稳定顺序（不引 dart:ui，可单测）
+    control_center_model.dart 控制中心的纯逻辑（列表排序、模式循环、确认规则）
     calendar_data.dart      日历的纯日期逻辑
   src/modules/              每个模块一个文件
   src/widgets/
@@ -192,7 +195,7 @@ lib/
 
 ### 默认布局只有一个来源
 
-`module_defaults.dart` 是 id、区、优先级的**唯一**书写处：9 个模块实现、
+`module_defaults.dart` 是 id、区、优先级的**唯一**书写处：10 个模块实现、
 注册表和测试都读它。注册表的 `_factories` 只把描述符 id 映射到实现，
 `NeoTopBarModules.all` 再按这份常量列表生成——所以：
 
@@ -445,6 +448,50 @@ _grab       0 → 1，360ms + Motion.md3Emphasized
 溢出（`kMaxWindowIcons = 10`）是从**稳定顺序**前面截的，所以能看见的永远是那十个，
 后开的窗口先记进 `+N`，直到这十个里有人关闭。这是"图标不动"的代价——
 如果改成轮换可见集合，开窗关窗时整排又会动。
+
+### 控制中心：全部走宿主 provider，不 shell out
+
+面板里的每一项都接在 Denial **自己的** provider 上，所以它和系统别处永远一致
+（硬件音量键改了音量、设置里换了主题、托盘菜单关了 Wi-Fi，面板下一帧就是对的）：
+
+| 控件 | provider |
+|---|---|
+| 音量、静音 | `neoVolumeProvider`（本插件）包着 `audioServiceProvider` |
+| 亮度 | `displayBrightnessProvider`（按显示器，面板控制**自己那块屏**） |
+| Wi-Fi | `networkConnectivityProvider` |
+| 蓝牙 | `bluetoothProvider` |
+| 免打扰 | `desktopNotificationsProvider` |
+| 深浅模式 | `shellSettingsProvider` |
+| 锁屏 / 睡眠 / 休眠 / 注销 / 重启 / 关机 | `sessionPowerProvider` |
+
+**一条都不 spawn 进程、不读配置文件、不直连 D-Bus。** SDK 明确写了音频这条路
+「The embedded Dart runtime must never spawn a CLI for this path」，而且
+`wpctl` / `brightnessctl` / `nmcli` 那种做法会绕开宿主的权限与状态管理。
+
+几个具体决定：
+
+- **静音 = 把音量设成 0。** 音频桥只暴露「设置百分比」一个写接口，没有 mute 调用，
+  所以取消静音必须自己记住之前的音量（`neoVolumeAfterMuteToggle`，纯函数 + 单测）。
+- **滑条拖动时不信回声。** 每次 `apply` 都带一个 request serial，宿主会把结果以
+  `AudioLevelState` 回送；拖动期间如果照单全收，回声会把旋钮从手底下拽回去。
+  所以拖动时本地值赢，松手后再接受回声（`neoVolumeEchoWindow` 之外的旧 serial 直接作废，
+  这样硬件音量键的改动不会被自己的过期请求覆盖）。
+- **深浅模式是三态循环**（跟随系统 → 浅色 → 深色）。Denial 存的就是三态，
+  做成开关会强迫用户接受一个他从没选过的偏好。
+- **确认框由 provider 持有。** 注销 / 重启 / 关机需要确认这件事是
+  `SessionPowerAction.requiresConfirmation` 定的，面板只调 `request()`，
+  确认条读 `confirmationAction`——所以别处发起的动作在面板里也看得见、也能确认。
+  锁屏和睡眠不需要确认（它们立刻可逆）。
+- **开关和展开是两个热区。** 磁贴主体是「开/关这个子系统」，右上角的箭头才是
+  「展开列表」。一个热区既开又展，用户永远猜不到这一下会发生什么。
+- **Wi-Fi 列表按 SSID 合并。** 宿主是按 BSSID 给的，一个双频路由器会来两条；
+  合并时保留已连接的那条、否则保留信号强的（`neoWifiPanelEntries`，纯函数 + 单测）。
+  已保存的网络直接连，不再问密码。
+- **文本输入能用**：弹出层走 `shellPopupControllerProvider`，它的默认
+  `keyboardPolicy` 就是 `capture`，所以 Wi-Fi 密码框可以直接打字（用 `EditableText`，
+  因为这里没有 `Material` 祖先）。
+
+面板高度上限 620、宽 380，内容可滚动；所有列表都有条数上限，扫描结果不会把面板撑爆。
 
 ### 加一个新模块
 

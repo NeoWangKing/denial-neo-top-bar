@@ -6,6 +6,7 @@ library;
 export 'src/core/bar_drag_layout.dart';
 export 'src/core/calendar_data.dart';
 export 'src/core/config.dart';
+export 'src/core/control_center_model.dart';
 export 'src/core/drop_target.dart';
 export 'src/core/module_defaults.dart';
 export 'src/core/module_descriptor.dart';

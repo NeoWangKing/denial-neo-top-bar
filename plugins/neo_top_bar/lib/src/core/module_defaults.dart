@@ -23,6 +23,7 @@ abstract final class NeoModuleIds {
   static const String notifications = 'notifications';
   static const String media = 'media';
   static const String battery = 'battery';
+  static const String controlCenter = 'control_center';
   static const String cpu = 'cpu';
   static const String gpu = 'gpu';
   static const String clock = 'clock';
@@ -80,6 +81,17 @@ const NeoModuleDescriptor batteryModule = NeoModuleDescriptor(
   priority: 40,
 );
 
+/// The control centre sits just inside the clock, where a status menu is looked
+/// for: it is the pill that opens the panel, and it carries the at-a-glance
+/// readouts (volume, Wi-Fi, Bluetooth, battery) that the panels below expand on.
+const NeoModuleDescriptor controlCenterModule = NeoModuleDescriptor(
+  id: NeoModuleIds.controlCenter,
+  label: '控制中心',
+  description: '音量、亮度、Wi-Fi、蓝牙、深浅模式与开关机的弹出面板',
+  zone: NeoZone.end,
+  priority: 85,
+);
+
 const NeoModuleDescriptor cpuModule = NeoModuleDescriptor(
   id: NeoModuleIds.cpu,
   label: 'CPU 负载',
@@ -120,5 +132,6 @@ const List<NeoModuleDescriptor> neoTopBarDefaultModules = <NeoModuleDescriptor>[
   batteryModule,
   cpuModule,
   gpuModule,
+  controlCenterModule,
   clockModule,
 ];
