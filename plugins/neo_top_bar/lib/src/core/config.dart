@@ -54,10 +54,6 @@ String neoNextInstanceId(String moduleId, Iterable<String> taken) {
   }
 }
 
-/// The title a settings card shows for the [number]-th instance of [label].
-String neoInstanceLabel(String label, int number) =>
-    number <= 1 ? label : '$label $number';
-
 /// Spacing scale for the whole bar.
 ///
 /// This is a deliberate top-level option rather than a per-module one: the
@@ -453,11 +449,11 @@ class NeoModulePlacement {
   /// This instance's own settings.
   final Map<String, Object?> options;
 
-  /// The number shown on this instance's card: 1 for the first copy.
+  /// This instance's number: 1 for the first copy.
+  ///
+  /// Identity, not decoration: two copies of the same module are told apart by
+  /// where they are, so the number never reaches the screen.
   int get number => neoInstanceNumber(id, moduleId);
-
-  /// The title a card shows for this instance.
-  String get label => neoInstanceLabel(descriptor.label, number);
 
   @override
   String toString() =>

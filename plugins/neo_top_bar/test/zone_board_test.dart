@@ -75,42 +75,11 @@ void main() {
 
   group('neoAddCandidates', () {
     test('offers every module, including ones already on the bar', () {
-      final candidates = neoAddCandidates(
-        descriptors: _descriptors,
-        placements: placements(),
-      );
-      expect(candidates.map((entry) => entry.descriptor.id), <String>[
-        'a',
-        'b',
-        'c',
-        'd',
-      ]);
-    });
-
-    test('counts the copies that are on the bar', () {
-      final onTheBar = <NeoModulePlacement>[
-        ...placements(),
-        // A second copy of 'a', which is what an instance makes possible.
-        NeoModulePlacement(
-          id: 'a#2',
-          moduleId: 'a',
-          descriptor: _descriptors.first,
-          zone: NeoZone.center,
-          enabled: true,
-        ),
-      ];
-      final candidates = neoAddCandidates(
-        descriptors: _descriptors,
-        placements: onTheBar,
-      );
-      final first = candidates.singleWhere(
-        (entry) => entry.descriptor.id == 'a',
-      );
-      expect(first.existing, 2);
-      // 'd' is switched off, so nothing of it is on the bar.
+      // The list used to skip whatever was already on the zone, which is what
+      // made adding a second copy move the first one instead.
       expect(
-        candidates.singleWhere((entry) => entry.descriptor.id == 'd').existing,
-        0,
+        neoAddCandidates(_descriptors).map((descriptor) => descriptor.id),
+        <String>['a', 'b', 'c', 'd'],
       );
     });
   });

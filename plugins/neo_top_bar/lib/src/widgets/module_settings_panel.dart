@@ -312,10 +312,7 @@ class _ZoneSection extends StatelessWidget {
           ),
         _AddModuleButton(
           zone: zone,
-          candidates: neoAddCandidates(
-            descriptors: descriptors,
-            placements: placements,
-          ),
+          candidates: neoAddCandidates(descriptors),
           state: state,
           descriptors: descriptors,
         ),
@@ -442,9 +439,7 @@ class _ModuleCardState extends State<_ModuleCard> {
                         children: [
                           Expanded(
                             child: Text(
-                              // The number is what tells two copies of the same
-                              // module apart on the board and in the bar.
-                              widget.placement.label,
+                              descriptor.label,
                               style: theme.text.systemBarValue.copyWith(
                                 fontSize: 14,
                               ),
@@ -538,7 +533,7 @@ class _ExpandedSettings extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              '「${placement.label}」设置',
+              '「${placement.descriptor.label}」设置',
               style: theme.text.systemBarCaption.copyWith(
                 fontSize: 12,
                 color: theme.colors.textSecondary,
@@ -580,7 +575,7 @@ class _AddModuleButton extends StatefulWidget {
   });
 
   final NeoZone zone;
-  final List<NeoAddCandidate> candidates;
+  final List<NeoModuleDescriptor> candidates;
   final NeoTopBarConfigState state;
   final Iterable<NeoModuleDescriptor> descriptors;
 
@@ -622,14 +617,14 @@ class _AddModuleButtonState extends State<_AddModuleButton> {
                   children: [
                     for (final candidate in widget.candidates)
                       _AddCandidateRow(
-                        candidate: candidate,
+                        descriptor: candidate,
                         onPressed: () {
                           setState(() => _open = false);
                           widget.state.addInstance(
-                            candidate.descriptor.id,
+                            candidate.id,
                             zone: widget.zone,
                             descriptors: widget.descriptors,
-                            defaultZone: candidate.descriptor.zone,
+                            defaultZone: candidate.zone,
                           );
                         },
                       ),
@@ -645,19 +640,14 @@ class _AddModuleButtonState extends State<_AddModuleButton> {
 }
 
 class _AddCandidateRow extends StatelessWidget {
-  const _AddCandidateRow({required this.candidate, required this.onPressed});
+  const _AddCandidateRow({required this.descriptor, required this.onPressed});
 
-  final NeoAddCandidate candidate;
+  final NeoModuleDescriptor descriptor;
   final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
     final theme = ShellTheme.of(context);
-    // The first copy is just "添加"; the rest say which number they will be, so
-    // the card that follows is predictable.
-    final hint = candidate.existing == 0
-        ? '添加'
-        : '添加第 ${candidate.existing + 1} 个';
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
@@ -671,13 +661,15 @@ class _AddCandidateRow extends StatelessWidget {
               const SizedBox(width: 9),
               Expanded(
                 child: Text(
-                  candidate.descriptor.label,
+                  descriptor.label,
                   style: theme.text.systemBarValue.copyWith(fontSize: 13),
                 ),
               ),
               const SizedBox(width: 8),
               Text(
-                hint,
+                // Adding a copy is the same gesture as adding the first one, so
+                // there is nothing to distinguish here.
+                '添加',
                 style: theme.text.systemBarCaption.copyWith(
                   fontSize: 11.5,
                   color: theme.colors.textTertiary,

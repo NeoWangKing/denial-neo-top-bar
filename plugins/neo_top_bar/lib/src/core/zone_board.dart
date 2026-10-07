@@ -16,50 +16,19 @@
 /// Kept free of Flutter so it is unit-testable — see `neo_top_bar_logic.dart`.
 library;
 
-import 'config.dart';
 import 'module_descriptor.dart';
 
-/// One entry of a zone's add list: a module kind, and how many copies of it are
-/// already on the bar.
-class NeoAddCandidate {
-  const NeoAddCandidate({required this.descriptor, required this.existing});
-
-  final NeoModuleDescriptor descriptor;
-
-  /// Copies of this module that are currently on the bar, anywhere.
-  ///
-  /// The list offers every kind regardless — the point of instances is that any
-  /// module can be added any number of times, to any zone — so the count is what
-  /// tells the user what they are about to create.
-  final int existing;
-
-  @override
-  String toString() => 'NeoAddCandidate(${descriptor.id}, existing: $existing)';
-}
-
-/// What the add list should offer, in descriptor order.
+/// What the add list offers: every module kind, in descriptor order.
 ///
-/// Deliberately unfiltered: a module already on the bar is still offered,
-/// because a second copy is a legitimate thing to want (two clocks, one per
-/// time zone, say). The count is carried so the button can say which copy is
-/// about to be created.
-List<NeoAddCandidate> neoAddCandidates({
-  required Iterable<NeoModuleDescriptor> descriptors,
-  required Iterable<NeoModulePlacement> placements,
-}) {
-  final counts = <String, int>{};
-  for (final placement in placements) {
-    if (!placement.enabled) continue;
-    counts[placement.moduleId] = (counts[placement.moduleId] ?? 0) + 1;
-  }
-  return List<NeoAddCandidate>.unmodifiable(<NeoAddCandidate>[
-    for (final descriptor in descriptors)
-      NeoAddCandidate(
-        descriptor: descriptor,
-        existing: counts[descriptor.id] ?? 0,
-      ),
-  ]);
-}
+/// Deliberately unfiltered. The list used to skip modules that were already on
+/// the zone — a leftover from when a module could only exist once — and that is
+/// exactly what made "add a workspaces pill to the centre" *move* the one on the
+/// right instead of creating a second. With instances, a second copy is a
+/// legitimate thing to want, so nothing here is filtered out and there is no
+/// count to report: the board already shows what is on the bar.
+List<NeoModuleDescriptor> neoAddCandidates(
+  Iterable<NeoModuleDescriptor> descriptors,
+) => List<NeoModuleDescriptor>.unmodifiable(descriptors);
 
 /// The `beforeId` for a drop that landed at [newIndex], given the zone's ids in
 /// the order the list was built with.

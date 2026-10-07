@@ -394,11 +394,6 @@ void main() {
       );
     });
 
-    test('a card label carries the number only when it is needed', () {
-      expect(neoInstanceLabel('时钟与日期', 1), '时钟与日期');
-      expect(neoInstanceLabel('时钟与日期', 2), '时钟与日期 2');
-    });
-
     test('the same module can be placed several times, in several zones', () {
       var config = NeoTopBarConfig.empty;
       // A second clock, on the left, alongside the default one.
@@ -422,10 +417,12 @@ void main() {
       ]);
       expect(clocks.first.zone, NeoZone.start);
       expect(clocks.last.zone, NeoZone.end);
-      expect(clocks.map((placement) => placement.label), <String>[
-        '时钟与日期 2',
-        '时钟与日期',
-      ]);
+      // Both copies carry the same title: the number is identity, not a label,
+      // and where a card sits is what tells the two apart.
+      expect(
+        clocks.map((placement) => placement.descriptor.label).toSet(),
+        <String>{'时钟与日期'},
+      );
     });
 
     test('each copy keeps its own settings', () {
