@@ -232,6 +232,9 @@ class _BarContentState extends State<_BarContent> {
   ];
 
   void _startDrag(String id, Offset globalPosition) {
+    // One drag at a time: the preview replaces the resting layout, so a second
+    // long press would otherwise measure keys that are not mounted.
+    if (_draggingId != null) return;
     final horizontal = _horizontal;
     final rects = <String, Rect>{};
     final zones = <NeoZoneExtent>[];
@@ -346,6 +349,11 @@ class _BarContentState extends State<_BarContent> {
     );
   }
 
+  void _endDragIfActive() {
+    if (_draggingId == null) return;
+    _endDrag();
+  }
+
   void _clearDrag() {
     setState(() {
       _draggingId = null;
@@ -375,6 +383,12 @@ class _BarContentState extends State<_BarContent> {
       // `opaque` makes the strip itself a hit target while still delivering
       // events to its children, so the tray keeps its own right-click menus.
       behavior: HitTestBehavior.opaque,
+      // Safety net for the drag state. The long-press callbacks normally end a
+      // drag, but if the pointer is ever released without reaching them the bar
+      // would stay in the preview layout, which has no long-press handlers — so
+      // nothing would be draggable again until the shell restarted.
+      onPointerUp: (_) => _endDragIfActive(),
+      onPointerCancel: (_) => _endDragIfActive(),
       onPointerDown: (event) {
         if (event.buttons != kSecondaryButton) return;
         // A raw Listener does not compete in the gesture arena, so anything the
@@ -631,9 +645,28 @@ class _BarContentState extends State<_BarContent> {
             top: feedbackCenter.dy - feedbackSize.height / 2,
             width: feedbackSize.width,
             height: feedbackSize.height,
-            // The real pill follows the pointer. Wrapped so it cannot swallow
-            // the pointer that is moving it.
-            child: IgnorePointer(child: feedback),
+            // The real pill follows the pointer, and it keeps the *same*
+            // GlobalKey the resting layout gave it. That is load-bearing:
+            // Flutter re-parents the keyed element instead of rebuilding it, so
+            // the long-press recogniser driving this drag stays alive. Replacing
+            // the widget that owns a gesture disposes its recogniser, and
+            // disposal never calls onLongPressEnd — the drag would then sit
+            // frozen on its first frame, with no pill draggable, forever.
+            //
+            // IgnorePointer is safe here: an accepted long press receives its
+            // move and up events through the pointer router, not hit testing.
+            child: IgnorePointer(
+              child: _DraggablePill(
+                slotKey: _keyFor(draggingId),
+                id: draggingId,
+                dragging: false,
+                onDragStart: _startDrag,
+                onDragUpdate: _updateDrag,
+                onDragEnd: _endDrag,
+                onDragCancel: _clearDrag,
+                child: feedback,
+              ),
+            ),
           ),
       ],
     );

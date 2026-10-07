@@ -213,6 +213,24 @@ lib/
 被拖动的胶囊**仍然计入**它所在区间的范围：它的槽位尺寸不变，而且如果一个区只有它一个
 胶囊（比如中间区的启动器），把它排除就会让那个区变成无法投放到的地方。
 
+### 拖动预览：不能让手势宿主被销毁
+
+拖动预览会**替换整棵 widget 树**，承载长按的 `_DraggablePill` 也被换掉。这是致命的：
+Flutter 在手势识别器 `dispose` 时**不会调用 `onLongPressEnd` / `onLongPressCancel`**
+（`OneSequenceGestureRecognizer.dispose` 只把指针路由摘掉），所以那个拖动**永远收不到
+后续的 move / end 回调**。症状很有欺骗性：
+
+- 被拖的胶囊被"定格"在按下位置 → 看起来是"某个胶囊卡死了"
+- 预览布局里没有 `_DraggablePill` 包装 → **所有胶囊都没有长按处理器** → 什么都拖不动
+- `_draggingId` 清不掉 → 永久卡在预览分支，直到外壳重启
+
+修法是给跟随指针的反馈挂**同一个 GlobalKey**：GlobalKey 会让 Flutter **搬迁 element
+而不是重建**，识别器和进行中的手势就活下来了。反馈外面的 `IgnorePointer` 不影响它——
+已被接受的长按是通过指针路由收 move/up 的，不靠命中测试。
+
+另外加了一道兜底：顶栏的 `Listener` 也监听 `onPointerUp` / `onPointerCancel`，
+指针在栏内抬起时无论如何都会结束拖动，避免再出现"永久卡住"。
+
 ### 拖动预览：显式定位 + 冻结落点
 
 拖动期间顶栏**不用 flex 布局**，改成按 `neoDragLayout` 算出的显式坐标放置，
