@@ -477,12 +477,24 @@ _grab       0 → 1，360ms + Motion.md3Emphasized
   `AudioLevelState` 回送；拖动期间如果照单全收，回声会把旋钮从手底下拽回去。
   所以拖动时本地值赢，松手后再接受回声（`neoVolumeEchoWindow` 之外的旧 serial 直接作废，
   这样硬件音量键的改动不会被自己的过期请求覆盖）。
-- **深浅模式是两态开关**，而且按的是「屏幕现在是什么」而不是「配置里写的是什么」。
-  Denial 确实存三态，但这个 SDK 版本里第三态 `noPreference` 的
-  `effectiveBrightness` 是写死的 `denialDefaultBrightness`（深色），
-  所以循环到它会出现**按一下毫无变化**——这正是你报的「深色模式按钮按了没效果」。
-  现在每次点击都切到另一个明确偏好，**每一下都有可见变化**；
-  哪天上游让 `noPreference` 真的跟随 portal，再加回第三态只是一行。
+- **深浅模式按钮必须写对那个「管用的」设置。** 这里有**两个**设置能决定顶栏颜色，
+  谁生效取决于透明度模式：`denial_shell.dart` 里
+
+  ```dart
+  final light = appearance.transparencyMode == ShellTransparencyMode.glass
+      ? appearance.glass.appearance == ShellGlassAppearance.light
+      : appearance.colorSchemePreference.effectiveBrightness == Brightness.light;
+  ```
+
+  也就是说**玻璃模式下顶栏读的是 `glass.appearance`，`colorSchemePreference` 被完全忽略**。
+  我前两版只写了后者，于是那个按钮改的是一个屏幕上没人读的设置——**这就是"按了没效果"的真正原因**
+  （之前猜的"第三态没变化"是错的，虽然那条也确实存在）。
+  规则现在抽成 `neoThemeToggle()`（纯函数 + 2 条单测）：玻璃模式下必须写 `glass.appearance`；
+  两种模式**都**写 `colorSchemePreference`，因为**应用**跟随的是它，
+  只改顶栏不改应用等于半个开关。
+- **两态而不是三态**：Denial 存三态没错，但这个 SDK 版本里第三态
+  `noPreference` 的 `effectiveBrightness` 是写死的 `denialDefaultBrightness`（深色），
+  循环到它就是一次没有视觉变化的点击。
 - **每个图标还能右键**：音量=静音/取消静音、网络=开关无线、蓝牙=开关适配器、电量不绑定。
   用的是和系统托盘一样的次键词汇。实现上每个图标是独立的 `Listener`（原始指针事件，
   不进手势竞技场），所以胶囊本身的左键点击照旧打开面板；胶囊的 `_isOverPill`

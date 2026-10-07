@@ -169,6 +169,29 @@ void main() {
         expect(neoThemeModeLabel(mode), isNotEmpty);
       }
     });
+
+    test('in glass mode the tap must write the glass appearance', () {
+      // The shell reads `glass.appearance` while the transparency mode is glass,
+      // so writing only the colour scheme is the bug this guards: it changed a
+      // setting nothing on screen read.
+      final toggle = neoThemeToggle(
+        current: NeoThemeMode.dark,
+        glassTransparency: true,
+      );
+      expect(toggle.mode, NeoThemeMode.light);
+      expect(toggle.writeGlass, isTrue);
+      expect(toggle.writeColorScheme, isTrue);
+    });
+
+    test('outside glass mode the colour scheme is what the shell reads', () {
+      final toggle = neoThemeToggle(
+        current: NeoThemeMode.light,
+        glassTransparency: false,
+      );
+      expect(toggle.mode, NeoThemeMode.dark);
+      expect(toggle.writeGlass, isFalse);
+      expect(toggle.writeColorScheme, isTrue);
+    });
   });
 
   group('neoWiredLinkUp', () {

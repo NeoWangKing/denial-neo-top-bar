@@ -159,6 +159,46 @@ String neoThemeModeLabel(NeoThemeMode mode) => switch (mode) {
   NeoThemeMode.dark => '深色',
 };
 
+/// The writes a theme tap has to make, given what is on screen.
+///
+/// Two settings can drive the shell's colours, and which one wins depends on the
+/// transparency mode: while it is `glass`, `denial_shell.dart` derives the shell
+/// colour scheme from `glass.appearance` and ignores `colorSchemePreference`
+/// entirely. A tile that writes only the colour scheme therefore changes a
+/// setting nothing on screen reads — which is exactly the bug this type exists
+/// to prevent, twice over. Applications still follow the colour scheme, so both
+/// are written on every tap.
+class NeoThemeToggle {
+  const NeoThemeToggle({
+    required this.mode,
+    required this.writeGlass,
+    required this.writeColorScheme,
+  });
+
+  /// The appearance to switch to.
+  final NeoThemeMode mode;
+
+  /// Whether `glass.appearance` must be written for the shell to change.
+  final bool writeGlass;
+
+  /// Whether `colorSchemePreference` must be written so applications follow.
+  final bool writeColorScheme;
+
+  @override
+  String toString() =>
+      'NeoThemeToggle($mode, glass: $writeGlass, '
+      'colorScheme: $writeColorScheme)';
+}
+
+NeoThemeToggle neoThemeToggle({
+  required NeoThemeMode current,
+  required bool glassTransparency,
+}) => NeoThemeToggle(
+  mode: neoNextThemeMode(current),
+  writeGlass: glassTransparency,
+  writeColorScheme: true,
+);
+
 /// One network interface as the wired-link rule needs it.
 ///
 /// Read from sysfs plus a routable-address check, because Denial's network

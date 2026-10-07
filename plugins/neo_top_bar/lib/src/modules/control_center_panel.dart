@@ -121,10 +121,26 @@ class _NeoControlCenterPanelState extends ConsumerState<NeoControlCenterPanel> {
     final notifications = ref.watch(desktopNotificationsProvider);
     final settings = ref.watch(shellSettingsProvider);
     final power = ref.watch(sessionPowerProvider);
-    final dark =
-        settings.appearance.colorSchemePreference.effectiveBrightness ==
-        Brightness.dark;
+    final appearance = settings.appearance;
+    // Which of the two settings the shell obeys depends on the transparency
+    // mode. In glass mode the shell's colours come from `glass.appearance`
+    // (`denial_shell.dart` picks `ShellColorScheme.light`/`dark` from it and
+    // ignores the colour scheme entirely), so a button that only wrote
+    // `colorSchemePreference` changed nothing anyone could see. That was the
+    // bug: the tile was writing a setting the shell does not read in this mode.
+    final glassMode =
+        appearance.transparencyMode == ShellTransparencyMode.glass;
+    final dark = glassMode
+        ? appearance.glass.appearance == ShellGlassAppearance.dark
+        : appearance.colorSchemePreference.effectiveBrightness ==
+              Brightness.dark;
     final themeMode = neoThemeMode(isDark: dark);
+    // Which setting the tap has to write is a rule, not an implementation
+    // detail: see `neoThemeToggle` and its tests.
+    final themeToggle = neoThemeToggle(
+      current: themeMode,
+      glassTransparency: glassMode,
+    );
 
     return NeoPopupSurface(
       services: widget.services,
@@ -218,17 +234,29 @@ class _NeoControlCenterPanelState extends ConsumerState<NeoControlCenterPanel> {
                   title: '深浅模式',
                   subtitle: neoThemeModeLabel(themeMode),
                   active: dark,
-                  // Always sets an explicit preference: the third setting,
-                  // "follow the system", renders as a fixed brightness in this
-                  // SDK version, so cycling through it produced taps that
-                  // changed nothing at all.
-                  onTap: () => ref
-                      .read(shellSettingsProvider.notifier)
-                      .setColorSchemePreference(
-                        neoNextThemeMode(themeMode) == NeoThemeMode.dark
+                  onTap: () {
+                    final controller = ref.read(shellSettingsProvider.notifier);
+                    if (themeToggle.writeGlass) {
+                      controller.setGlassConfiguration(
+                        appearance.glass.copyWith(
+                          appearance: themeToggle.mode == NeoThemeMode.dark
+                              ? ShellGlassAppearance.dark
+                              : ShellGlassAppearance.light,
+                        ),
+                      );
+                    }
+                    if (themeToggle.writeColorScheme) {
+                      // Applications follow the colour scheme rather than the
+                      // glass appearance, so both are kept in step: a dark-mode
+                      // button that left every window in the old theme would be
+                      // half a switch.
+                      controller.setColorSchemePreference(
+                        themeToggle.mode == NeoThemeMode.dark
                             ? DesktopColorSchemePreference.preferDark
                             : DesktopColorSchemePreference.preferLight,
-                      ),
+                      );
+                    }
+                  },
                 ),
               ],
             ),
