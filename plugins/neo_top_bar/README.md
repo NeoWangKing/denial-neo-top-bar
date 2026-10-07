@@ -16,7 +16,7 @@
 | 模块 | id | 区 | 默认 | 说明 |
 |---|---|---|---|---|
 | 工作区胶囊 | `workspaces` | 左 | 开 | 每个工作区一个圆点，当前工作区高亮，占用状态变实心；点击切换 |
-| 应用启动器 | `launcher` | 中 | 开 | Arch Linux 图标 + **当前工作区每个窗口的图标**，点击图标聚焦该窗口、点击其余部分调 `services.toggleLauncher()`；胶囊宽度随窗口数动态伸缩，超过 10 个折叠成 `+N` |
+| 应用启动器 | `launcher` | 中 | 开 | Arch Linux 图标 + **当前工作区每个窗口的图标**，点击图标聚焦该窗口、点击其余部分调 `services.toggleLauncher()`；胶囊宽度随窗口数动态伸缩，超过 10 个折叠成 `+N`；图标顺序按窗口**首次出现**固定，点谁都不会重排 |
 | 系统托盘 | `tray` | 右 | 开 | StatusNotifier 图标；托盘隐藏或为空时整块自动消失 |
 | 通知 | `notifications` | 右 | 开 | 未读徽章 + 历史面板（逐条忽略 / 全部清除 / 免打扰） |
 | 媒体播放 | `media` | 右 | **关** | 曲目 + 上一首 / 播放暂停 / 下一首；无播放时自动消失 |
@@ -160,6 +160,7 @@ DENIAL_PLUGIN_DART="$(command -v dart)"
 "$DENIAL_PLUGIN_DART" --packages=.dart_tool/package_config.json test/config_test.dart
 "$DENIAL_PLUGIN_DART" --packages=.dart_tool/package_config.json test/popup_geometry_test.dart
 "$DENIAL_PLUGIN_DART" --packages=.dart_tool/package_config.json test/preferences_test.dart
+"$DENIAL_PLUGIN_DART" --packages=.dart_tool/package_config.json test/window_order_test.dart
 ```
 
 ## 代码结构
@@ -179,6 +180,7 @@ lib/
     drop_target.dart        落点解析（先判区，再判区内间隙）
     bar_drag_layout.dart    三个区的几何：显式坐标 / 拖动预览共用
     popup_geometry.dart     面板锚定几何（不引 dart:ui，可单测）
+    window_order.dart       启动器窗口图标的稳定顺序（不引 dart:ui，可单测）
     calendar_data.dart      日历的纯日期逻辑
   src/modules/              每个模块一个文件
   src/widgets/
@@ -349,6 +351,39 @@ _grab       0 → 1，360ms + Motion.md3Emphasized
 根本没有列表可交换。越界移动是 no-op，所以 UI 的按钮在区边界可以放心地置灰。
 纯逻辑，有单测覆盖（物化、前移/后移、边界 no-op、跨区不越界、未知 id）。
 
+### 启动器里的窗口图标：顺序固定
+
+`services.windows(monitorId)` 返回的是**宿主的 z-order**，所以点一个图标去聚焦窗口，
+那个窗口被提到最前，**整排图标跟着重排**——下一次要点的东西永远不在上一次教会你的
+位置上。这是"点了就变"的根因。
+
+修法不是换个排序键，而是**记住窗口第一次出现的顺序**（`core/window_order.dart` 的
+`neoStableWindowOrder`），宿主顺序只用来决定"这一帧新出现的窗口谁在前"：
+
+```dart
+稳定顺序 = [还存在的旧顺序] + [本帧新出现的，按宿主顺序]
+```
+
+三条行为都是刻意的：
+
+| 事件 | 结果 |
+|---|---|
+| 点击某个窗口 | 只有高亮板变，**任何图标都不动** |
+| 窗口关闭 | 其余图标**不往空位里挤**，位置肌肉记忆保留 |
+| 新窗口出现 | 追加到末尾（同一帧开好几个时按宿主顺序） |
+
+记忆放在 `_LauncherContentState._order`：这是个 `List<int>`，每帧用当前窗口 id 重算，
+**消失的 id 直接丢掉**，所以长度永远不会超过当前窗口数，不需要额外的清理逻辑。
+写入字段发生在 `build` 里且**不调 `setState`**——这个值当场就被这次 build 用掉了，
+没有"稍后生效"的东西要调度。
+
+因为它只对"没见过的 id"参考宿主顺序，所以**不依赖宿主顺序的语义**：
+就算上游把 z-order 换成别的规则，这个胶囊依然稳定。
+
+溢出（`kMaxWindowIcons = 10`）是从**稳定顺序**前面截的，所以能看见的永远是那十个，
+后开的窗口先记进 `+N`，直到这十个里有人关闭。这是"图标不动"的代价——
+如果改成轮换可见集合，开窗关窗时整排又会动。
+
 ### 加一个新模块
 
 1. 在 `module_defaults.dart`：`NeoModuleIds` 加 id 常量，并写一个
@@ -381,7 +416,7 @@ _grab       0 → 1，360ms + Motion.md3Emphasized
 
    也就是说 `services.windows(monitorId)` 返回的**就是**"这块屏当前工作区的窗口"
    （外加最小化和固定显示的）。插件根本不需要那个字段。启动器胶囊现在正是用它显示
-   窗口图标。
+   窗口图标（顺序另按"首次出现"固定，见上文）。
 
    **仍然做不到的是其它工作区的窗口**：API 只暴露当前工作区的，
    所以"工作区胶囊里每个工作区各自列自己的应用"还是需要上游补能力。

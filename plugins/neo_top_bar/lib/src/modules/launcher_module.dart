@@ -12,6 +12,10 @@
 /// minimized and always-visible (pinned) windows. A plugin therefore does not
 /// need a workspace field on the window model to answer "what is on this
 /// workspace" — the host already answered it.
+///
+/// The host's order is z-order, so it changes on every activation. The row is
+/// therefore drawn in the order windows were *first seen* in, not in the order
+/// the host reports them — see `core/window_order.dart` for why.
 library;
 
 import 'package:denial_flutter_sdk/services.dart';
@@ -23,6 +27,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import '../core/module.dart';
 import '../core/module_defaults.dart';
 import '../core/module_descriptor.dart';
+import '../core/window_order.dart';
 import '../widgets/neo_card.dart';
 
 /// The distribution mark shown in the launcher pill.
@@ -43,6 +48,11 @@ const String kLauncherLogoAsset = 'assets/archlinux-logo.svg';
 ///
 /// A pill wider than the strip would either clip or cover the whole bar, and the
 /// counter is more useful than a scroller nobody can reach.
+///
+/// The cut is taken from the *stable* order, so the same ten icons stay visible
+/// and a window opened later is counted in `+N` until one of those ten closes.
+/// That is the price of not moving icons around; the alternative — rotating the
+/// visible set — would shuffle the row on every open and close.
 const int kMaxWindowIcons = 10;
 
 /// Icon size as a fraction of the strip's cross extent, clamped to sane pixels.
@@ -79,30 +89,56 @@ class LauncherModule implements NeoModule {
       _LauncherContent(module: module);
 }
 
-class _LauncherContent extends ConsumerWidget {
+class _LauncherContent extends ConsumerStatefulWidget {
   const _LauncherContent({required this.module});
 
   final NeoModuleContext module;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_LauncherContent> createState() => _LauncherContentState();
+}
+
+class _LauncherContentState extends ConsumerState<_LauncherContent> {
+  /// The order window icons were first seen in, so they never move on a click.
+  ///
+  /// Held in state rather than derived, because "first seen" is by definition
+  /// information the current frame does not carry. See `core/window_order.dart`.
+  List<int> _order = const <int>[];
+
+  @override
+  Widget build(BuildContext context) {
+    final module = widget.module;
     final services = module.services;
     final windows = ref.watch(services.windows(module.monitorId));
     final theme = ShellTheme.of(context);
     final gap = 5 * module.density;
 
-    final shown = windows.length > kMaxWindowIcons
-        ? windows.sublist(0, kMaxWindowIcons)
-        : windows;
-    final hidden = windows.length - shown.length;
+    // Recomputed on every build and written without `setState`: the value is
+    // used by this very build, so there is nothing to schedule. Dropping the
+    // windows that closed also bounds the memory.
+    _order = neoStableWindowOrder(
+      current: <int>[for (final window in windows) window.id],
+      previous: _order,
+    );
+    final byId = <int, ApplicationWindow>{
+      for (final window in windows) window.id: window,
+    };
+    // Every id in `_order` is present by construction, but a lookup keeps this
+    // total rather than relying on that.
+    final ordered = <ApplicationWindow>[for (final id in _order) ?byId[id]];
+
+    final shown = ordered.length > kMaxWindowIcons
+        ? ordered.sublist(0, kMaxWindowIcons)
+        : ordered;
+    final hidden = ordered.length - shown.length;
 
     return NeoCardButton(
       accent: module.accent,
       density: module.density,
       horizontal: module.horizontal,
-      tooltip: windows.isEmpty
+      tooltip: ordered.isEmpty
           ? '打开应用启动器'
-          : '打开应用启动器 · 当前工作区 ${windows.length} 个窗口',
+          : '打开应用启动器 · 当前工作区 ${ordered.length} 个窗口',
       onPressed: services.toggleLauncher,
       padding: EdgeInsets.symmetric(
         horizontal: 10 * module.density,
