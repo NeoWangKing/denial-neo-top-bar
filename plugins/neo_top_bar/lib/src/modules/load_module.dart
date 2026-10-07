@@ -66,22 +66,28 @@ class _GpuContent extends ConsumerWidget {
     final gpus = ref.watch(module.services.gpus);
     if (gpus.isEmpty) return const SizedBox.shrink();
     final horizontal = module.horizontal;
+    final gap = 8 * module.density;
     return Flex(
       direction: horizontal ? Axis.horizontal : Axis.vertical,
       mainAxisSize: MainAxisSize.min,
+      // The bar stretches each module to the strip's full thickness. An extra
+      // Flex in between breaks that chain: without `stretch` here the cards keep
+      // their content height and every GPU pill comes out shorter than the CPU
+      // pill next to it.
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (final gpu in gpus)
-          Padding(
-            padding: EdgeInsets.only(
-              right: horizontal ? 8 * module.density : 0,
-              bottom: horizontal ? 0 : 8 * module.density,
-            ),
-            child: NeoLoadMeter(
-              module: module,
-              label: gpu.label,
-              series: gpu.series,
-            ),
+        for (var index = 0; index < gpus.length; index++) ...[
+          // The gap goes *between* pills, not after each one. Trailing padding
+          // after the last GPU inflated this module's slot by 8px, which showed
+          // up as an uneven gap on its trailing side.
+          if (index > 0)
+            SizedBox(width: horizontal ? gap : 0, height: horizontal ? 0 : gap),
+          NeoLoadMeter(
+            module: module,
+            label: gpus[index].label,
+            series: gpus[index].series,
           ),
+        ],
       ],
     );
   }
