@@ -1,0 +1,9 @@
+.dart_tool/
+build/
+.flutter-plugins*
+pubspec_overrides.yaml
+.vscode/settings.json
+
+# Machine-specific here: with the SDK overrides above active, Pub records the
+# local SDK path in the lock. The upstream collection does not commit lockfiles.
+pubspec.lock

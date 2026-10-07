@@ -1,0 +1,17 @@
+# Dart / Flutter build output.
+.dart_tool/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Local authoring configuration. These carry machine-specific paths and must
+# never be committed; Denial's plugin manager supplies its own SDK overrides
+# when a plugin is installed.
+pubspec_overrides.yaml
+.vscode/settings.json
+
+# Resolved lockfiles are machine-specific here: while the overrides above are
+# active, Pub records the local SDK *path* in the lock. The upstream
+# denialwm/denial-plugins collection does not commit lockfiles for the same
+# reason. SDK compatibility belongs in pubspec.yaml constraints.
+pubspec.lock

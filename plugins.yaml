@@ -1,0 +1,12 @@
+# Plugin catalog for THIS repository, read by Denial's plugin manager.
+#
+# `git` is the repository the manager clones when someone installs a catalog
+# entry, so it must be this repository's URL. Pointing it at another repository
+# would install that repository's package at the same path instead.
+#
+# To install locally without the catalog:
+#   denial-plugins --local add plugins/neo_top_bar
+schema: 1
+plugins:
+  - git: https://github.com/NeoWangKing/denial-neo-top-bar.git
+    path: plugins/neo_top_bar
