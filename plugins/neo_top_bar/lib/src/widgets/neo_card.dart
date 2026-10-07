@@ -9,6 +9,7 @@ library;
 
 import 'package:denial_flutter_sdk/effects.dart';
 import 'package:denial_flutter_sdk/theme.dart';
+import 'package:flutter/gestures.dart' show kPrimaryButton;
 import 'package:flutter/material.dart';
 
 class NeoCard extends StatelessWidget {
@@ -94,10 +95,10 @@ class NeoCardButton extends StatefulWidget {
 
 class _NeoCardButtonState extends State<NeoCardButton>
     with SingleTickerProviderStateMixin {
-  /// A press pops the pill slightly. Kept small because the strip clips: at 1.04
-  /// a 45px-tall pill grows well under a pixel per edge, so nothing is visibly
-  /// cut off.
-  static const double _pressedScale = 1.04;
+  /// A press pops the pill slightly. Kept small because the strip clips: at 1.05
+  /// a 45px-tall pill grows about a pixel per edge, so nothing is visibly cut
+  /// off. Raise this for a punchier pop.
+  static const double _pressedScale = 1.05;
 
   /// The controller's value *is* the scale, so the spring drives it directly.
   ///
@@ -112,6 +113,11 @@ class _NeoCardButtonState extends State<NeoCardButton>
 
   bool _hovered = false;
   bool _focused = false;
+
+  /// Whether the primary button is currently down on this pill. Pointer-up
+  /// events carry no button mask, so the press has to be remembered to match it
+  /// with the release.
+  bool _pressed = false;
 
   @override
   void dispose() {
@@ -201,9 +207,6 @@ class _NeoCardButtonState extends State<NeoCardButton>
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: widget.onPressed,
-            onTapDown: (_) => _press(),
-            onTapUp: (_) => _release(),
-            onTapCancel: _release,
             child: FocusableActionDetector(
               onShowFocusHighlight: (value) => setState(() => _focused = value),
               child: content,
@@ -216,11 +219,33 @@ class _NeoCardButtonState extends State<NeoCardButton>
     if (widget.tooltip case final tooltip?) {
       content = Tooltip(message: tooltip, child: content);
     }
-    return AnimatedBuilder(
-      animation: _scale,
-      builder: (context, child) =>
-          Transform.scale(scale: _scale.value, child: child),
-      child: content,
+    // A raw Listener, not the tap callbacks: with the long-press drag recogniser
+    // competing for the pointer, the tap recogniser does not fire `onTapDown`
+    // until it wins the arena or its 100ms deadline expires, and a quick click
+    // releases in the same frame — so the pop would be started and cancelled
+    // before it moved. A Listener does not join the arena and fires on the down
+    // event itself, so the press feedback is immediate. It also does not consume
+    // anything, so the tap still reaches the pill.
+    return Listener(
+      onPointerDown: (event) {
+        if (event.buttons != kPrimaryButton) return;
+        _pressed = true;
+        _press();
+      },
+      onPointerUp: (_) => _handleRelease(),
+      onPointerCancel: (_) => _handleRelease(),
+      child: AnimatedBuilder(
+        animation: _scale,
+        builder: (context, child) =>
+            Transform.scale(scale: _scale.value, child: child),
+        child: content,
+      ),
     );
+  }
+
+  void _handleRelease() {
+    if (!_pressed) return;
+    _pressed = false;
+    _release();
   }
 }

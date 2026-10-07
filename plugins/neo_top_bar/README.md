@@ -279,9 +279,28 @@ lib/
 
 | 场景 | 做法 | 为什么 |
 |---|---|---|
-| 点击胶囊 | `springTo(_scale, 1.04, spring: Motion.snappy)` 压下，抬起时 `springTo(_scale, 1.0, spring: Motion.bouncy)` 回弹 | `Motion.snappy` 是官方给"卡片、开关这类小而灵敏的元素"的弹簧；`bouncy` 允许一点过冲，就是回弹感 |
+| 点击胶囊 | 按下立刻 `springTo(_scale, 1.05, spring: Motion.snappy)`，抬起 `springTo(_scale, 1.0, spring: Motion.bouncy)` 回弹 | `Motion.snappy` 是官方给"卡片、开关这类小而灵敏的元素"的弹簧；`bouncy` 允许一点过冲，就是回弹感 |
 | 悬停/聚焦高亮 | `AnimatedContainer(duration: Motion.cardSettle, curve: Motion.standard)` | 原来是一帧内直接换色，所以显得"跳"。只动 `BoxDecoration`，不产生图层 |
 | 拖动时被拿起的胶囊 | `Visibility(maintainSize: true)` —— **不画**，而不是半透明 | 见下 |
+
+### 按下反馈必须用 `Listener`，不能用 `onTapDown`
+
+这是"看不到动画"的真正原因，浪费了一轮排查，值得写下来：
+
+`GestureDetector.onTapDown` **不是**在指针按下时触发的，它要等 tap 识别器
+**赢下手势竞技场**（或自身 100ms 超时）。而每个胶囊外面套着 `_DraggablePill` 的
+长按识别器（拖拽用），竞技场不会在按下那一刻结算。于是：
+
+```
+快速点击（<100ms）：按下和抬起落在同一帧
+  → onTapDown 与 onTapUp 同帧触发
+  → 放大弹簧刚起步就被回弹弹簧取消
+  → 净效果 = 0 动画
+```
+
+改用裸 `Listener`（`onPointerDown` / `onPointerUp` / `onPointerCancel`）：它**不参与
+竞技场**，在按下事件的当帧就回调；同时它也不消费事件，所以点击照常传给胶囊。
+`PointerUpEvent.buttons` 恒为 0（按键已释放），所以要用一个 `_pressed` 标志来配对。
 
 ### 缩放绝不能包 `Opacity` 或 `ShellFadeScale`
 
