@@ -31,6 +31,7 @@ import '../core/module_descriptor.dart';
 import '../core/module_registry.dart';
 import '../core/zone_board.dart';
 import 'neo_popup_surface.dart';
+import 'neo_setting_controls.dart';
 
 /// Opens the settings card, centered in the bar's output.
 ///
@@ -876,105 +877,12 @@ class _DensityRow extends StatelessWidget {
             style: theme.text.systemBarValue.copyWith(fontSize: 14),
           ),
         ),
-        _Segmented<NeoDensity>(
+        NeoSettingChips<NeoDensity>(
           values: _labels,
           selected: state.config.density,
           onSelected: state.setDensity,
         ),
       ],
-    );
-  }
-}
-
-/// A row of mutually exclusive choices, drawn the way Denial's own settings draw
-/// them: one bordered chip per choice, spaced apart, the selected one filled with
-/// a translucent accent and outlined in the accent colour.
-///
-/// The earlier version was a single plate with an accent-coloured segment inside
-/// it. Two rounded rectangles sharing an edge anti-alias against each other, so
-/// the selected segment's corners came out ragged — and it was a different
-/// control from every other one in the shell. Separate chips have one rounded
-/// rectangle each, which is both correct to rasterise and what the rest of
-/// Denial looks like.
-class _Segmented<T> extends StatelessWidget {
-  const _Segmented({
-    required this.values,
-    required this.selected,
-    required this.onSelected,
-  });
-
-  final Map<T, String> values;
-  final T selected;
-  final ValueChanged<T> onSelected;
-
-  @override
-  Widget build(BuildContext context) => Semantics(
-    explicitChildNodes: true,
-    child: Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      alignment: WrapAlignment.end,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        for (final entry in values.entries)
-          _SegmentButton(
-            label: entry.value,
-            selected: entry.key == selected,
-            onPressed: () => onSelected(entry.key),
-          ),
-      ],
-    ),
-  );
-}
-
-class _SegmentButton extends StatelessWidget {
-  const _SegmentButton({
-    required this.label,
-    required this.selected,
-    required this.onPressed,
-  });
-
-  final String label;
-  final bool selected;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = ShellTheme.of(context);
-    return Semantics(
-      checked: selected,
-      inMutuallyExclusiveGroup: true,
-      child: ExcludeSemantics(
-        child: MouseRegion(
-          cursor: SystemMouseCursors.click,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: onPressed,
-            child: AnimatedContainer(
-              duration: Motion.cardSettle,
-              curve: Motion.standard,
-              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
-              decoration: BoxDecoration(
-                color: selected
-                    ? theme.accent.withValues(alpha: 0.22)
-                    : theme.colors.tileOff,
-                borderRadius: theme.borderRadius(theme.chipRadius),
-                border: Border.all(
-                  color: selected ? theme.accent : theme.colors.hairline,
-                ),
-              ),
-              child: Text(
-                label,
-                style: theme.text.systemBarCaption.copyWith(
-                  fontSize: 12.5,
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-                  color: selected ? theme.accent : theme.colors.textSecondary,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
     );
   }
 }

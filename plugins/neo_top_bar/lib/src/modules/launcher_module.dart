@@ -18,17 +18,23 @@
 /// the host reports them — see `core/window_order.dart` for why.
 library;
 
+import 'dart:io';
+
 import 'package:denial_flutter_sdk/services.dart';
 import 'package:denial_flutter_sdk/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
+import '../core/launcher_options.dart';
 import '../core/module.dart';
 import '../core/module_defaults.dart';
 import '../core/module_descriptor.dart';
 import '../core/window_order.dart';
 import '../widgets/neo_card.dart';
+import '../widgets/neo_file_browser.dart';
+import '../widgets/neo_setting_controls.dart';
+import 'launcher_system_icon.dart';
 
 /// The distribution mark shown in the launcher pill.
 ///
@@ -75,7 +81,7 @@ const double _maxIcon = 30;
 /// `'packages/denial_flutter_sdk/assets/branding/denial-dark.svg'`.
 const String _assetPackage = 'neo_top_bar';
 
-class LauncherModule implements NeoModule {
+class LauncherModule implements NeoModule, NeoModuleSettings {
   const LauncherModule();
 
   @override
@@ -87,6 +93,10 @@ class LauncherModule implements NeoModule {
   @override
   Widget build(BuildContext context, NeoModuleContext module) =>
       _LauncherContent(module: module);
+
+  @override
+  Widget buildSettings(BuildContext context, NeoModuleSettingsScope scope) =>
+      _LauncherSettings(scope: scope);
 }
 
 class _LauncherContent extends ConsumerStatefulWidget {
@@ -112,6 +122,11 @@ class _LauncherContentState extends ConsumerState<_LauncherContent> {
     final windows = ref.watch(services.windows(module.monitorId));
     final theme = ShellTheme.of(context);
     final gap = 5 * module.density;
+    final logo = ref.watch(neoSystemLogoProvider);
+    final options = neoLauncherOptions(
+      module.options,
+      systemIconAvailable: logo.available,
+    );
 
     // Recomputed on every build and written without `setState`: the value is
     // used by this very build, so there is nothing to schedule. Dropping the
@@ -127,18 +142,24 @@ class _LauncherContentState extends ConsumerState<_LauncherContent> {
     // total rather than relying on that.
     final ordered = <ApplicationWindow>[for (final id in _order) ?byId[id]];
 
-    final shown = ordered.length > kMaxWindowIcons
-        ? ordered.sublist(0, kMaxWindowIcons)
-        : ordered;
-    final hidden = ordered.length - shown.length;
+    // The window list is the pill's second half, and the setting that turns it
+    // off is about the *bar*, not about the data: the provider stays subscribed
+    // either way so switching it back on is immediate.
+    final listed = options.showWindows ? ordered : const <ApplicationWindow>[];
+    final shown = listed.length > kMaxWindowIcons
+        ? listed.sublist(0, kMaxWindowIcons)
+        : listed;
+    final hidden = listed.length - shown.length;
 
     return NeoCardButton(
       accent: module.accent,
       density: module.density,
       horizontal: module.horizontal,
-      tooltip: ordered.isEmpty
+      tooltip: !options.showWindows
           ? '打开应用启动器'
-          : '打开应用启动器 · 当前工作区 ${ordered.length} 个窗口',
+          : (listed.isEmpty
+                ? '打开应用启动器'
+                : '打开应用启动器 · 当前工作区 ${listed.length} 个窗口'),
       onPressed: services.toggleLauncher,
       padding: EdgeInsets.symmetric(
         horizontal: 10 * module.density,
@@ -165,20 +186,14 @@ class _LauncherContentState extends ConsumerState<_LauncherContent> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Center(
-                child: SvgPicture.asset(
-                  kLauncherLogoAsset,
-                  package: _assetPackage,
-                  width: logoSize,
-                  height: logoSize,
-                  // Retains the logo's proportions, as the trademark policy asks.
-                  fit: BoxFit.contain,
-                  // Monochrome tint: the asset keeps its official `#1793d1` fill
-                  // on disk and is recoloured only while painting. `srcIn` keeps
-                  // the glyph's alpha, so the ™ mark is still drawn.
-                  colorFilter: ColorFilter.mode(
-                    theme.colors.textPrimary,
-                    BlendMode.srcIn,
+                child: NeoLauncherMark(
+                  art: neoLauncherArt(
+                    options: options,
+                    systemLogoPath: logo.path,
+                    bundledAsset: kLauncherLogoAsset,
                   ),
+                  size: logoSize,
+                  color: theme.colors.textPrimary,
                 ),
               ),
               if (shown.isNotEmpty) ...[
@@ -212,6 +227,73 @@ class _LauncherContentState extends ConsumerState<_LauncherContent> {
         },
       ),
     );
+  }
+}
+
+/// The launcher's mark, drawn from whichever source the settings chose.
+///
+/// One widget for all four cases — a glyph, the bundled asset, a distribution
+/// file, or the user's own image — because the pill should not care where the
+/// picture came from, and because a file that disappears has to degrade to the
+/// glyph rather than to nothing.
+class NeoLauncherMark extends StatelessWidget {
+  const NeoLauncherMark({
+    required this.art,
+    required this.size,
+    required this.color,
+    super.key,
+  });
+
+  final NeoLauncherArt art;
+  final double size;
+
+  /// Tint for the monochrome sources. A user's own image is never recoloured:
+  /// they picked it for how it looks.
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    switch (art.kind) {
+      case NeoLauncherArtKind.glyph:
+        return Icon(Icons.apps, size: size, color: color);
+      case NeoLauncherArtKind.asset:
+        return SvgPicture.asset(
+          art.value,
+          package: _assetPackage,
+          width: size,
+          height: size,
+          // Retains the logo's proportions, as the trademark policy asks.
+          fit: BoxFit.contain,
+          // Monochrome tint: the asset keeps its official `#1793d1` fill on disk
+          // and is recoloured only while painting. `srcIn` keeps the glyph's
+          // alpha, so the ™ mark is still drawn.
+          colorFilter: ColorFilter.mode(color, BlendMode.srcIn),
+        );
+      case NeoLauncherArtKind.file:
+        final file = File(art.value);
+        if (!file.existsSync()) {
+          // The file the setting points at is gone: the glyph is the one mark
+          // that is always there.
+          return Icon(Icons.apps, size: size, color: color);
+        }
+        if (art.value.toLowerCase().endsWith('.svg')) {
+          return SvgPicture.file(
+            file,
+            width: size,
+            height: size,
+            fit: BoxFit.contain,
+            colorFilter: ColorFilter.mode(color, BlendMode.srcIn),
+          );
+        }
+        return Image.file(
+          file,
+          width: size,
+          height: size,
+          fit: BoxFit.contain,
+          errorBuilder: (context, _, _) =>
+              Icon(Icons.apps, size: size, color: color),
+        );
+    }
   }
 }
 
@@ -296,6 +378,139 @@ class _WindowIcon extends StatelessWidget {
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The launcher's own settings: which mark it carries, and whether the pill also
+/// lists the current workspace's windows.
+class _LauncherSettings extends ConsumerStatefulWidget {
+  const _LauncherSettings({required this.scope});
+
+  final NeoModuleSettingsScope scope;
+
+  @override
+  ConsumerState<_LauncherSettings> createState() => _LauncherSettingsState();
+}
+
+class _LauncherSettingsState extends ConsumerState<_LauncherSettings> {
+  bool _browsing = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final scope = widget.scope;
+    final logo = ref.watch(neoSystemLogoProvider);
+    final options = neoLauncherOptions(
+      scope.options,
+      systemIconAvailable: logo.available,
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        NeoSettingGroup(
+          title: '图标',
+          children: [
+            NeoSettingRow(
+              label: '用哪种图标',
+              description: neoLauncherIconDescription(options.effectiveIcon),
+              child: NeoSettingChips<NeoLauncherIcon>(
+                values: <NeoLauncherIcon, String>{
+                  for (final icon in neoLauncherIconOrder)
+                    icon: neoLauncherIconLabel(icon),
+                },
+                selected: options.icon,
+                enabled: neoLauncherIconSelectable,
+                onSelected: (icon) {
+                  scope.setOption(neoLauncherIconKey, icon.name);
+                  // A custom icon without a file would draw the grid; open the
+                  // browser straight away so choosing it means choosing a file.
+                  if (icon == NeoLauncherIcon.custom &&
+                      options.customPath.isEmpty) {
+                    setState(() => _browsing = true);
+                  } else {
+                    setState(() => _browsing = false);
+                  }
+                },
+              ),
+            ),
+            if (options.icon == NeoLauncherIcon.system)
+              _SettingsNote(
+                text: switch (logo.path) {
+                  final path? => '用的是 $path',
+                  _ => '这台机器上没有发行版的图标文件，栏上会用插件自带的那张。',
+                },
+              ),
+            if (options.icon == NeoLauncherIcon.custom) ...[
+              NeoImagePathField(
+                path: options.customPath,
+                browsing: _browsing,
+                onBrowse: () => setState(() => _browsing = !_browsing),
+                onChanged: (path) {
+                  scope.setOption(neoLauncherCustomPathKey, path);
+                  if (path != null) setState(() => _browsing = false);
+                },
+              ),
+              if (_browsing) ...[
+                const SizedBox(height: 8),
+                NeoFileBrowser(
+                  onSelected: (path) {
+                    scope.setOption(neoLauncherCustomPathKey, path);
+                    setState(() => _browsing = false);
+                  },
+                ),
+              ],
+            ],
+            if (options.fellBack)
+              const _SettingsNote(
+                text: '当前这个选择还用不了，栏上显示的是默认图标。',
+                warning: true,
+              ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        NeoSettingGroup(
+          title: '窗口',
+          children: [
+            NeoSettingRow(
+              label: '显示当前工作区的应用',
+              description: '在图标右边列出本工作区每个窗口的图标，点一下聚焦',
+              child: NeoSettingToggle(
+                value: options.showWindows,
+                onChanged: (value) =>
+                    scope.setOption(neoLauncherWindowsKey, value),
+              ),
+            ),
+          ],
+        ),
+        _SettingsNote(text: 'Denial 官方图标还没有发布，所以这一项暂时不能选。'),
+      ],
+    );
+  }
+}
+
+/// A muted line under a group: what a choice resolved to, or why it cannot be
+/// used. Not a setting row — there is nothing to press.
+class _SettingsNote extends StatelessWidget {
+  const _SettingsNote({required this.text, this.warning = false});
+
+  final String text;
+  final bool warning;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShellTheme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Text(
+        text,
+        style: theme.text.systemBarCaption.copyWith(
+          fontSize: 11.5,
+          color: warning
+              ? theme.colors.performanceWarning
+              : theme.colors.textTertiary,
         ),
       ),
     );

@@ -122,6 +122,114 @@ class NeoSettingToggle extends StatelessWidget {
   }
 }
 
+/// A row of mutually exclusive choices, drawn the way Denial's own settings draw
+/// them: one bordered chip per choice, spaced apart, the selected one filled with
+/// a translucent accent and outlined in the accent colour.
+///
+/// One rounded rectangle per choice on purpose. An earlier version was a single
+/// plate with an accent-coloured segment inside it, and two rounded rectangles
+/// sharing an edge anti-alias against each other — the selected segment's corners
+/// came out ragged. It is also the shape the rest of Denial uses.
+class NeoSettingChips<T> extends StatelessWidget {
+  const NeoSettingChips({
+    required this.values,
+    required this.selected,
+    required this.onSelected,
+    this.enabled,
+    super.key,
+  });
+
+  final Map<T, String> values;
+  final T selected;
+  final ValueChanged<T> onSelected;
+
+  /// Whether a choice can be picked at all. Choices that cannot are shown
+  /// dimmed rather than hidden, so the setting still says what is coming.
+  final bool Function(T value)? enabled;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    explicitChildNodes: true,
+    child: Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      alignment: WrapAlignment.end,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        for (final entry in values.entries)
+          _SettingChip(
+            label: entry.value,
+            selected: entry.key == selected,
+            onPressed: enabled == null || enabled!(entry.key)
+                ? () => onSelected(entry.key)
+                : null,
+          ),
+      ],
+    ),
+  );
+}
+
+class _SettingChip extends StatelessWidget {
+  const _SettingChip({
+    required this.label,
+    required this.selected,
+    required this.onPressed,
+  });
+
+  final String label;
+  final bool selected;
+
+  /// Null disables the chip.
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShellTheme.of(context);
+    final enabled = onPressed != null;
+    final accent = theme.accent;
+    return Semantics(
+      checked: selected,
+      enabled: enabled,
+      inMutuallyExclusiveGroup: true,
+      child: ExcludeSemantics(
+        child: MouseRegion(
+          cursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: onPressed,
+            child: AnimatedContainer(
+              duration: Motion.cardSettle,
+              curve: Motion.standard,
+              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
+              decoration: BoxDecoration(
+                color: selected
+                    ? accent.withValues(alpha: enabled ? 0.22 : 0.10)
+                    : theme.colors.tileOff,
+                borderRadius: theme.borderRadius(theme.chipRadius),
+                border: Border.all(
+                  color: selected
+                      ? accent.withValues(alpha: enabled ? 1 : 0.45)
+                      : theme.colors.hairline,
+                ),
+              ),
+              child: Text(
+                label,
+                style: theme.text.systemBarCaption.copyWith(
+                  fontSize: 12.5,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                  color: !enabled
+                      ? theme.colors.textTertiary
+                      : (selected ? accent : theme.colors.textSecondary),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// A titled group of settings inside an expanded row.
 class NeoSettingGroup extends StatelessWidget {
   const NeoSettingGroup({
