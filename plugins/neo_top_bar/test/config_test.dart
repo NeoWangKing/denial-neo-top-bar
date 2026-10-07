@@ -723,4 +723,114 @@ void main() {
       );
     });
   });
+
+  group('neoDragLayout', () {
+    Map<String, NeoPlacedPill> layout(List<NeoPillBox> pills) => neoDragLayout(
+      pills: pills,
+      mainExtent: 1000,
+      crossExtent: 55,
+      mainPadding: 8,
+      crossPadding: 5,
+      gap: 6,
+    );
+
+    test('pins the start zone to the leading edge', () {
+      final placed = layout(const <NeoPillBox>[
+        NeoPillBox(id: 'a', zone: NeoZone.start, extent: 100),
+        NeoPillBox(id: 'b', zone: NeoZone.start, extent: 50),
+      ]);
+      expect(placed['a']!.main, 8);
+      expect(placed['b']!.main, 8 + 100 + 6);
+    });
+
+    test('pins the end zone to the trailing edge', () {
+      final placed = layout(const <NeoPillBox>[
+        NeoPillBox(id: 'a', zone: NeoZone.end, extent: 100),
+        NeoPillBox(id: 'b', zone: NeoZone.end, extent: 50),
+      ]);
+      // total = 100 + 6 + 50, so the group ends 8 from the right edge.
+      expect(placed['a']!.main, 1000 - 8 - 156);
+      expect(placed['b']!.main, 1000 - 8 - 50);
+    });
+
+    test('centres the centre zone in the strip', () {
+      final placed = layout(const <NeoPillBox>[
+        NeoPillBox(id: 'a', zone: NeoZone.center, extent: 100),
+      ]);
+      expect(placed['a']!.main, 450);
+    });
+
+    test('keeps all three zones independent', () {
+      final placed = layout(const <NeoPillBox>[
+        NeoPillBox(id: 'l', zone: NeoZone.start, extent: 100),
+        NeoPillBox(id: 'm', zone: NeoZone.center, extent: 60),
+        NeoPillBox(id: 'r', zone: NeoZone.end, extent: 80),
+      ]);
+      expect(placed['l']!.main, 8);
+      expect(placed['m']!.main, 470);
+      expect(placed['r']!.main, 1000 - 8 - 80);
+    });
+
+    test('stretches every pill across the padded cross axis', () {
+      final placed = layout(const <NeoPillBox>[
+        NeoPillBox(id: 'a', zone: NeoZone.start, extent: 100),
+      ]);
+      expect(placed['a']!.cross, 5);
+      expect(placed['a']!.crossExtent, 45);
+    });
+
+    test('places nothing for the zones that have no pills', () {
+      final placed = layout(const <NeoPillBox>[
+        NeoPillBox(id: 'm', zone: NeoZone.center, extent: 60),
+      ]);
+      expect(placed.keys, <String>['m']);
+    });
+
+    test('gives up rather than placing into a degenerate strip', () {
+      expect(
+        neoDragLayout(
+          pills: const <NeoPillBox>[
+            NeoPillBox(id: 'a', zone: NeoZone.start, extent: 100),
+          ],
+          mainExtent: 0,
+          crossExtent: 55,
+          mainPadding: 8,
+          crossPadding: 5,
+          gap: 6,
+        ),
+        isEmpty,
+      );
+      expect(
+        neoDragLayout(
+          pills: const <NeoPillBox>[
+            NeoPillBox(id: 'a', zone: NeoZone.start, extent: 100),
+          ],
+          mainExtent: 1000,
+          crossExtent: 10,
+          mainPadding: 8,
+          crossPadding: 5,
+          gap: 6,
+        ),
+        isEmpty,
+      );
+    });
+
+    test('a reordered pill lands where the flex layout would put it', () {
+      // Same three pills, one moved from the end zone into the start zone. The
+      // remaining end-zone pill has to slide to the trailing edge.
+      final before = layout(const <NeoPillBox>[
+        NeoPillBox(id: 'a', zone: NeoZone.start, extent: 100),
+        NeoPillBox(id: 'b', zone: NeoZone.end, extent: 60),
+        NeoPillBox(id: 'c', zone: NeoZone.end, extent: 40),
+      ]);
+      final after = layout(const <NeoPillBox>[
+        NeoPillBox(id: 'a', zone: NeoZone.start, extent: 100),
+        NeoPillBox(id: 'b', zone: NeoZone.start, extent: 60),
+        NeoPillBox(id: 'c', zone: NeoZone.end, extent: 40),
+      ]);
+      expect(before['b']!.main, 1000 - 8 - 106);
+      expect(after['b']!.main, 8 + 100 + 6);
+      expect(after['c']!.main, 1000 - 8 - 40);
+    });
+  });
 }

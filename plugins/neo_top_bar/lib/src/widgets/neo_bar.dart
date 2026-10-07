@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/config.dart';
+import '../core/bar_drag_layout.dart';
 import '../core/config_state.dart';
 import '../core/drop_target.dart';
 import '../core/module.dart';
@@ -159,168 +160,168 @@ class _BarContent extends StatefulWidget {
 }
 
 class _BarContentState extends State<_BarContent> {
-  static const double _ghostWidth = 104;
-  static const double _ghostHeight = 30;
-
-  /// Measures pill rectangles in the strip's own coordinate space, so the drag
-  /// ghost can be positioned without another ancestor lookup.
+  /// The strip's coordinate space, for placing the drag feedback.
   final GlobalKey _stripKey = GlobalKey(debugLabel: 'neo-top-bar-strip');
 
   final Map<String, GlobalKey> _pillKeys = <String, GlobalKey>{};
 
-  /// Visible pills in bar order. Refreshed on every build; the drag reads the
-  /// copy from the last layout, which is still valid because a drag never
-  /// changes the layout until it is committed.
+  /// Visible pills in bar order, refreshed on every non-drag build.
   List<_PillSlot> _slots = const <_PillSlot>[];
 
   String? _draggingId;
-  Offset? _ghostCenter;
+
+  /// Pointer position, in strip coordinates, of the drag feedback.
+  Offset? _feedbackCenter;
+
   String? _targetBeforeId;
   NeoZone? _targetZone;
 
-  /// Main-axis position, in strip coordinates, of the insertion line shown while
-  /// dragging. The user needs to see where the pill will land, not just that
-  /// something is being dragged.
-  double? _indicatorMain;
+  /// Pill rectangles captured when the drag began, in scene coordinates.
+  ///
+  /// Frozen on purpose: the preview reflows while dragging, so measuring live
+  /// positions would make the drop target depend on the layout that target
+  /// produces. The pill sizes for the preview geometry come from here too.
+  Map<String, Rect> _dragRects = const <String, Rect>{};
+
+  /// Zone extents derived from [_dragRects], in bar order.
+  List<NeoZoneExtent> _dragZones = const <NeoZoneExtent>[];
+
+  /// A module widget per visible pill, built once when the drag starts.
+  ///
+  /// The drag preview is positioned from the pointer, so it rebuilds every
+  /// frame. Reusing the same widget instances means Flutter only moves the
+  /// existing elements instead of rebuilding every module's subtree — including
+  /// the host-rendered tray — sixty times a second.
+  Map<String, Widget> _dragChildren = const <String, Widget>{};
 
   bool get _horizontal => widget.side.isHorizontal;
+
+  NeoModuleContext get _moduleContext => NeoModuleContext(
+    services: widget.services,
+    monitorId: widget.monitorId,
+    side: widget.side,
+    accent: widget.accent,
+    density: widget.state.config.density.scale,
+  );
 
   GlobalKey _keyFor(String id) =>
       _pillKeys.putIfAbsent(id, () => GlobalKey(debugLabel: 'neo-pill-$id'));
 
+  Widget _module(
+    BuildContext context,
+    NeoModuleContext moduleContext,
+    String id,
+  ) => NeoTopBarModules.byId(id)!.build(context, moduleContext);
+
+  bool _isVisible(NeoModulePlacement placement, NeoModuleContext context) {
+    if (!placement.enabled) return false;
+    final module = NeoTopBarModules.byId(placement.descriptor.id);
+    return module != null && module.isAvailable(context);
+  }
+
+  List<NeoModulePlacement> _visiblePlacements(
+    NeoTopBarConfig config,
+    List<NeoModuleDescriptor> descriptors,
+    NeoModuleContext context,
+  ) => <NeoModulePlacement>[
+    for (final placement in resolvePlacements(
+      descriptors: descriptors,
+      config: config,
+    ))
+      if (_isVisible(placement, context)) placement,
+  ];
+
   void _startDrag(String id, Offset globalPosition) {
+    final horizontal = _horizontal;
+    final rects = <String, Rect>{};
+    final zones = <NeoZoneExtent>[];
+    for (final slot in _slots) {
+      final box = slot.key.currentContext?.findRenderObject();
+      if (box is! RenderBox || !box.attached || !box.hasSize) continue;
+      final rect = box.localToGlobal(Offset.zero) & box.size;
+      rects[slot.id] = rect;
+      final start = horizontal ? rect.left : rect.top;
+      final end = horizontal ? rect.right : rect.bottom;
+      if (zones.isNotEmpty && zones.last.zone == slot.zone) {
+        final previous = zones.removeLast();
+        zones.add(
+          NeoZoneExtent(
+            zone: slot.zone,
+            start: start < previous.start ? start : previous.start,
+            end: end > previous.end ? end : previous.end,
+          ),
+        );
+      } else {
+        zones.add(NeoZoneExtent(zone: slot.zone, start: start, end: end));
+      }
+    }
+    final moduleContext = _moduleContext;
     setState(() {
+      _dragRects = rects;
+      _dragZones = zones;
+      _dragChildren = <String, Widget>{
+        for (final slot in _slots)
+          if (rects.containsKey(slot.id))
+            slot.id: _module(context, moduleContext, slot.id),
+      };
       _draggingId = id;
-      _moveGhost(globalPosition);
+      _moveFeedback(globalPosition);
       _updateTarget(globalPosition);
     });
   }
 
   void _updateDrag(Offset globalPosition) {
     setState(() {
-      _moveGhost(globalPosition);
+      _moveFeedback(globalPosition);
       _updateTarget(globalPosition);
     });
   }
 
-  void _moveGhost(Offset globalPosition) {
+  void _moveFeedback(Offset globalPosition) {
     final strip = _stripKey.currentContext?.findRenderObject();
-    _ghostCenter = strip is RenderBox && strip.attached
+    _feedbackCenter = strip is RenderBox && strip.attached
         ? strip.globalToLocal(globalPosition)
         : null;
   }
 
-  /// Resolves where a drop at [globalPosition] would land, and where the
-  /// insertion line belongs.
+  /// Resolves where a drop at [globalPosition] would land.
   ///
-  /// The zone is decided first, from the extent each zone's pills occupy along
-  /// the bar, and only then is the position inside that zone resolved. Deciding
-  /// the zone from "the pill after this gap" is the bug that made a pill dropped
-  /// on the workspaces land next to the launcher: crossing the middle of a
-  /// zone's last pill flipped the answer into the following zone.
+  /// The zone is decided first, from the extent each zone's pills occupied when
+  /// the drag began, and only then the position inside that zone. Deciding the
+  /// zone from "the pill after this gap" is the bug that made a pill dropped on
+  /// the workspaces land next to the launcher: crossing the middle of a zone's
+  /// last pill flipped the answer into the following zone.
   void _updateTarget(Offset globalPosition) {
-    final horizontal = _horizontal;
-    final strip = _stripKey.currentContext?.findRenderObject();
-    final stripBox = strip is RenderBox && strip.attached ? strip : null;
-
-    // Every visible pill is measured, including the one being dragged: its slot
-    // keeps its size, so it still defines its zone's extent. Excluding it would
-    // make a single-pill zone (the launcher's, typically) undroppable.
-    final measured = <_PillSlot, Rect>{};
-    for (final slot in _slots) {
-      final box = slot.key.currentContext?.findRenderObject();
-      if (box is! RenderBox || !box.attached || !box.hasSize) continue;
-      measured[slot] = box.localToGlobal(Offset.zero) & box.size;
-    }
-    if (measured.isEmpty || stripBox == null) {
-      _targetZone = null;
-      _targetBeforeId = null;
-      _indicatorMain = null;
-      return;
-    }
-
-    double toLocal(double globalMain) => horizontal
-        ? stripBox.globalToLocal(Offset(globalMain, 0)).dx
-        : stripBox.globalToLocal(Offset(0, globalMain)).dy;
-    double startOf(Rect rect) => toLocal(horizontal ? rect.left : rect.top);
-    double endOf(Rect rect) => toLocal(horizontal ? rect.right : rect.bottom);
-    double centreOf(Rect rect) =>
-        toLocal(horizontal ? rect.center.dx : rect.center.dy);
-    final pointerGlobal = horizontal ? globalPosition.dx : globalPosition.dy;
-    final pointerLocal = toLocal(pointerGlobal);
-
-    // One extent per zone, in bar order, so a customised order still works.
-    final extents = <NeoZoneExtent>[];
-    for (final slot in _slots) {
-      final rect = measured[slot];
-      if (rect == null) continue;
-      final slotStart = startOf(rect);
-      final slotEnd = endOf(rect);
-      if (extents.isNotEmpty && extents.last.zone == slot.zone) {
-        final previous = extents.removeLast();
-        extents.add(
-          NeoZoneExtent(
-            zone: slot.zone,
-            start: slotStart < previous.start ? slotStart : previous.start,
-            end: slotEnd > previous.end ? slotEnd : previous.end,
-          ),
-        );
-      } else {
-        extents.add(
-          NeoZoneExtent(zone: slot.zone, start: slotStart, end: slotEnd),
-        );
-      }
-    }
-
+    final pointer = _horizontal ? globalPosition.dx : globalPosition.dy;
     final zone = neoDropZoneAt(
-      mainAxisPosition: pointerLocal,
-      zoneExtents: extents,
+      mainAxisPosition: pointer,
+      zoneExtents: _dragZones,
     );
     if (zone == null) {
       _targetZone = null;
       _targetBeforeId = null;
-      _indicatorMain = null;
       return;
     }
 
-    // Now the position, among that zone's own pills and ignoring the one that is
-    // being dragged.
     String? beforeId;
-    double? indicator;
     for (final slot in _slots) {
       if (slot.zone != zone || slot.id == _draggingId) continue;
-      final rect = measured[slot];
+      final rect = _dragRects[slot.id];
       if (rect == null) continue;
-      if (pointerLocal < centreOf(rect)) {
+      final middle = _horizontal ? rect.center.dx : rect.center.dy;
+      if (pointer < middle) {
         beforeId = slot.id;
-        indicator = startOf(rect);
         break;
       }
     }
-    if (beforeId == null) {
-      // Past the zone's last pill: the line goes after it.
-      for (final extent in extents) {
-        if (extent.zone == zone) indicator = extent.end;
-      }
-    }
-
     _targetZone = zone;
     _targetBeforeId = beforeId;
-    _indicatorMain = indicator;
-  }
-
-  /// What the drag ghost says: the module and the zone it would join, so the
-  /// destination is explicit rather than something to infer from the layout.
-  String _ghostLabel(String id) {
-    final module = NeoTopBarModules.descriptorOf(id)?.label ?? id;
-    final zone = _targetZone;
-    return zone == null ? module : '$module → ${zone.label}';
   }
 
   /// Whether [globalPosition] lands on one of the laid-out pills.
   ///
-  /// Reuses the rectangles the drag already measures, so there is no second
-  /// source of truth for where a pill is.
+  /// Reuses the same rectangles the drag measures, so there is no second source
+  /// of truth for where a pill is.
   bool _isOverPill(Offset globalPosition) {
     for (final slot in _slots) {
       final box = slot.key.currentContext?.findRenderObject();
@@ -348,37 +349,92 @@ class _BarContentState extends State<_BarContent> {
   void _clearDrag() {
     setState(() {
       _draggingId = null;
-      _ghostCenter = null;
+      _feedbackCenter = null;
       _targetBeforeId = null;
       _targetZone = null;
-      _indicatorMain = null;
+      _dragRects = const <String, Rect>{};
+      _dragZones = const <NeoZoneExtent>[];
+      _dragChildren = const <String, Widget>{};
     });
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = ShellTheme.of(context);
     final horizontal = _horizontal;
     final density = widget.state.config.density.scale;
-    final placements = resolvePlacements(
-      descriptors: NeoTopBarModules.descriptors,
-      config: widget.state.config,
-    );
-    final moduleContext = NeoModuleContext(
-      services: widget.services,
-      monitorId: widget.monitorId,
-      side: widget.side,
-      accent: widget.accent,
-      density: density,
-    );
+    final descriptors = NeoTopBarModules.descriptors;
+    final moduleContext = _moduleContext;
 
+    return Listener(
+      // Without `opaque` the strip only counts as hit where a child is, because
+      // Listener defaults to HitTestBehavior.deferToChild. The settings card
+      // opens on right-clicks that deliberately miss every pill, so with the
+      // default it could never fire at all: over a pill it is skipped on purpose,
+      // and over the empty stretches between zones there is no child to hit.
+      // `opaque` makes the strip itself a hit target while still delivering
+      // events to its children, so the tray keeps its own right-click menus.
+      behavior: HitTestBehavior.opaque,
+      onPointerDown: (event) {
+        if (event.buttons != kSecondaryButton) return;
+        // A raw Listener does not compete in the gesture arena, so anything the
+        // pills handle still runs. That is exactly why right-click must be
+        // ignored over a pill: the status tray renders host-side items whose
+        // context menus are opened with the secondary button, and opening this
+        // card as well would fight them.
+        if (_isOverPill(event.position)) return;
+        // The settings card opens centered rather than at the pointer: it is a
+        // configuration surface with many rows, not a context menu, so the click
+        // position carries no meaning for it.
+        openModuleSettingsPanel(
+          context: context,
+          state: widget.state,
+          services: widget.services,
+          monitorId: widget.monitorId,
+        );
+      },
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (_draggingId != null && _targetZone != null) {
+            return _buildDragPreview(
+              context: context,
+              theme: theme,
+              size: constraints.biggest,
+              moduleContext: moduleContext,
+              descriptors: descriptors,
+              density: density,
+            );
+          }
+          return _buildFlexLayout(
+            context: context,
+            theme: theme,
+            horizontal: horizontal,
+            density: density,
+            moduleContext: moduleContext,
+            descriptors: descriptors,
+          );
+        },
+      ),
+    );
+  }
+
+  /// The resting layout: zones spread, pills sized by their content.
+  Widget _buildFlexLayout({
+    required BuildContext context,
+    required ShellThemeData theme,
+    required bool horizontal,
+    required double density,
+    required NeoModuleContext moduleContext,
+    required List<NeoModuleDescriptor> descriptors,
+  }) {
     final zones = <NeoZone, List<Widget>>{};
     final slots = <_PillSlot>[];
-    for (final placement in placements) {
-      if (!placement.enabled) continue;
+    for (final placement in _visiblePlacements(
+      widget.state.config,
+      descriptors,
+      moduleContext,
+    )) {
       final id = placement.descriptor.id;
-      final module = NeoTopBarModules.byId(id);
-      if (module == null) continue;
-      if (!module.isAvailable(moduleContext)) continue;
       final key = _keyFor(id);
       slots.add(_PillSlot(id: id, zone: placement.zone, key: key));
       (zones[placement.zone] ??= <Widget>[]).add(
@@ -388,16 +444,11 @@ class _BarContentState extends State<_BarContent> {
             slotKey: key,
             id: id,
             dragging: _draggingId == id,
-            // The pill the drop would land in front of.
-            target:
-                _draggingId != null &&
-                id != _draggingId &&
-                _targetBeforeId == id,
             onDragStart: _startDrag,
             onDragUpdate: _updateDrag,
             onDragEnd: _endDrag,
             onDragCancel: _clearDrag,
-            child: module.build(context, moduleContext),
+            child: _module(context, moduleContext, id),
           ),
         ),
       );
@@ -489,78 +540,107 @@ class _BarContentState extends State<_BarContent> {
       );
     }
 
-    final draggingId = _draggingId;
-    final ghostCenter = _ghostCenter;
-    final indicatorMain = _indicatorMain;
-    final theme = ShellTheme.of(context);
-    return Listener(
-      // Without `opaque` the strip only counts as hit where a child is, because
-      // Listener defaults to HitTestBehavior.deferToChild. The settings card
-      // opens on right-clicks that deliberately miss every pill, so with the
-      // default it could never fire at all: over a pill it is skipped on purpose,
-      // and over the empty stretches between zones there is no child to hit.
-      // `opaque` makes the strip itself a hit target while still delivering
-      // events to its children, so the tray keeps its own right-click menus.
-      behavior: HitTestBehavior.opaque,
-      onPointerDown: (event) {
-        if (event.buttons != kSecondaryButton) return;
-        // A raw Listener does not compete in the gesture arena, so anything the
-        // pills handle still runs. That is exactly why right-click must be
-        // ignored over a pill: the status tray renders host-side items whose
-        // context menus are opened with the secondary button, and opening this
-        // card as well would fight them.
-        if (_isOverPill(event.position)) return;
-        // The settings card opens centered rather than at the pointer: it is a
-        // configuration surface with many rows, not a context menu, so the click
-        // position carries no meaning for it.
-        openModuleSettingsPanel(
-          context: context,
-          state: widget.state,
-          services: widget.services,
-          monitorId: widget.monitorId,
-        );
-      },
-      child: Stack(
-        key: _stripKey,
-        children: [
-          // While a pill is being dragged its slot keeps its size, so the rest
-          // of the bar stays put and only the ghost moves.
-          Padding(
-            padding: horizontal
-                ? const EdgeInsets.symmetric(horizontal: 8, vertical: 5)
-                : const EdgeInsets.symmetric(horizontal: 5, vertical: 8),
-            child: layout,
-          ),
-          if (draggingId != null && indicatorMain != null)
-            Positioned(
-              left: horizontal ? indicatorMain - 1.5 : 3,
-              right: horizontal ? null : 3,
-              top: horizontal ? 3 : indicatorMain - 1.5,
-              bottom: horizontal ? 3 : null,
-              width: horizontal ? 3 : null,
-              height: horizontal ? null : 3,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: theme.accent,
-                  borderRadius: theme.borderRadius(3),
-                ),
-              ),
-            ),
-          if (draggingId != null && ghostCenter != null)
-            Positioned(
-              left: ghostCenter.dx - _ghostWidth / 2,
-              top: ghostCenter.dy - _ghostHeight / 2,
-              width: _ghostWidth,
-              height: _ghostHeight,
-              child: _DragGhost(label: _ghostLabel(draggingId)),
-            ),
-        ],
+    return Stack(
+      key: _stripKey,
+      children: [
+        Padding(
+          padding: horizontal
+              ? const EdgeInsets.symmetric(horizontal: 8, vertical: 5)
+              : const EdgeInsets.symmetric(horizontal: 5, vertical: 8),
+          child: layout,
+        ),
+      ],
+    );
+  }
+
+  /// The dragging layout: explicit offsets so the reflow can be animated.
+  ///
+  /// The preview is produced by the same pure function that will be persisted on
+  /// drop, so what the user sees while dragging is exactly what they get. The
+  /// dragged pill's slot shows a placeholder and the real pill follows the
+  /// pointer.
+  Widget _buildDragPreview({
+    required BuildContext context,
+    required ShellThemeData theme,
+    required Size size,
+    required NeoModuleContext moduleContext,
+    required List<NeoModuleDescriptor> descriptors,
+    required double density,
+  }) {
+    final horizontal = _horizontal;
+    final draggingId = _draggingId!;
+    final preview = _visiblePlacements(
+      moveModuleToSlot(
+        config: widget.state.config,
+        descriptors: descriptors,
+        moduleId: draggingId,
+        targetZone: _targetZone!,
+        beforeId: _targetBeforeId,
       ),
+      descriptors,
+      moduleContext,
+    );
+
+    final placed = neoDragLayout(
+      pills: <NeoPillBox>[
+        for (final placement in preview)
+          if (_dragRects[placement.descriptor.id] case final rect?)
+            NeoPillBox(
+              id: placement.descriptor.id,
+              zone: placement.zone,
+              extent: horizontal ? rect.width : rect.height,
+            ),
+      ],
+      mainExtent: horizontal ? size.width : size.height,
+      crossExtent: horizontal ? size.height : size.width,
+      mainPadding: 8,
+      crossPadding: 5,
+      gap: 6 * density,
+    );
+
+    final feedbackSize = _dragRects[draggingId]?.size;
+    final feedbackCenter = _feedbackCenter;
+    final feedback = _dragChildren[draggingId];
+    return Stack(
+      key: _stripKey,
+      children: [
+        for (final placement in preview)
+          if (placed[placement.descriptor.id] case final at?)
+            AnimatedPositioned(
+              key: ValueKey<String>('neo-drag-${placement.descriptor.id}'),
+              // Short enough to track the pointer, long enough to read as the
+              // pills making room rather than jumping.
+              duration: Motion.tile,
+              curve: Motion.standard,
+              left: horizontal ? at.main : at.cross,
+              top: horizontal ? at.cross : at.main,
+              width: horizontal ? at.extent : at.crossExtent,
+              height: horizontal ? at.crossExtent : at.extent,
+              child: placement.descriptor.id == draggingId
+                  ? const _DragPlaceholder()
+                  : _dragChildren[placement.descriptor.id] ??
+                        _module(
+                          context,
+                          moduleContext,
+                          placement.descriptor.id,
+                        ),
+            ),
+        if (feedbackSize != null && feedbackCenter != null && feedback != null)
+          Positioned(
+            left: feedbackCenter.dx - feedbackSize.width / 2,
+            top: feedbackCenter.dy - feedbackSize.height / 2,
+            width: feedbackSize.width,
+            height: feedbackSize.height,
+            // The real pill follows the pointer. Wrapped so it cannot swallow
+            // the pointer that is moving it.
+            child: IgnorePointer(child: feedback),
+          ),
+      ],
     );
   }
 }
 
-/// Wraps one pill with the long-press drag gesture and the drop highlight.
+/// Wraps one pill with the long-press drag gesture.
 ///
 /// A long press, not an immediate pan: an immediate drag would swallow the tap
 /// every pill already answers to.
@@ -569,7 +649,6 @@ class _DraggablePill extends StatelessWidget {
     required this.slotKey,
     required this.id,
     required this.dragging,
-    required this.target,
     required this.onDragStart,
     required this.onDragUpdate,
     required this.onDragEnd,
@@ -580,7 +659,6 @@ class _DraggablePill extends StatelessWidget {
   final GlobalKey slotKey;
   final String id;
   final bool dragging;
-  final bool target;
   final void Function(String id, Offset globalPosition) onDragStart;
   final ValueChanged<Offset> onDragUpdate;
   final VoidCallback onDragEnd;
@@ -589,45 +667,25 @@ class _DraggablePill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = ShellTheme.of(context);
     return GestureDetector(
       key: slotKey,
       onLongPressStart: (details) => onDragStart(id, details.globalPosition),
       onLongPressMoveUpdate: (details) => onDragUpdate(details.globalPosition),
       onLongPressEnd: (_) => onDragEnd(),
       onLongPressCancel: onDragCancel,
-      child: DecoratedBox(
-        // A DecoratedBox paints inside the child's box, so highlighting never
-        // changes the measured width mid-drag.
-        decoration: BoxDecoration(
-          borderRadius: theme.borderRadius(999),
-          border: target
-              ? Border.all(color: theme.accent, width: 2)
-              : const Border.fromBorderSide(BorderSide.none),
-        ),
-        // The lifted pill keeps its slot — so the rest of the bar does not
-        // reflow under the pointer and the drop target stays stable — but paints
-        // nothing. Deliberately not an Opacity fade: a partly transparent layer
-        // around ShellBackdropBlur makes the glass sample that layer instead of
-        // the wallpaper, which is a defect the SDK documents. At opacity 0
-        // Flutter skips painting the child entirely, so no layer is involved.
-        child: Visibility(
-          visible: !dragging,
-          maintainSize: true,
-          maintainState: true,
-          maintainAnimation: true,
-          child: child,
-        ),
-      ),
+      child: child,
     );
   }
 }
 
-/// The pill-shaped label that follows the pointer while dragging.
-class _DragGhost extends StatelessWidget {
-  const _DragGhost({required this.label});
-
-  final String label;
+/// The silhouette left in the gap the dragged pill would drop into.
+///
+/// A shape rather than a second copy of the pill: a translucent copy would have
+/// to wrap `ShellBackdropBlur` in a layer, which makes the glass sample that
+/// layer instead of the wallpaper, and rebuilding the module would render the
+/// host tray twice.
+class _DragPlaceholder extends StatelessWidget {
+  const _DragPlaceholder();
 
   @override
   Widget build(BuildContext context) {
@@ -635,20 +693,9 @@ class _DragGhost extends StatelessWidget {
     return IgnorePointer(
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: theme.panelColor(theme.colors.panelBackground),
+          color: theme.accent.withValues(alpha: 0.14),
           borderRadius: theme.borderRadius(999),
-          border: Border.all(color: theme.accent, width: 2),
-        ),
-        child: Center(
-          child: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.text.systemBarCaption.copyWith(
-              fontSize: 12,
-              color: theme.colors.textPrimary,
-            ),
-          ),
+          border: Border.all(color: theme.accent.withValues(alpha: 0.55)),
         ),
       ),
     );

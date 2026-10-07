@@ -3,6 +3,7 @@
 /// Nothing here imports Flutter widgets, so it runs under plain `dart test`.
 library;
 
+export 'src/core/bar_drag_layout.dart';
 export 'src/core/calendar_data.dart';
 export 'src/core/config.dart';
 export 'src/core/drop_target.dart';
