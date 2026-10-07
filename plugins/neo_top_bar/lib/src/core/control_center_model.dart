@@ -135,25 +135,184 @@ bool _bluetoothWins(NeoBluetoothEntry candidate, NeoBluetoothEntry current) {
   return (candidate.signal ?? -1) > (current.signal ?? -1);
 }
 
-/// The three states the theme tile cycles through.
+/// The two states the theme tile switches between.
 ///
-/// Three rather than two on purpose: a plain dark/light switch cannot express
-/// "follow the system", which is what Denial stores by default, and forcing a
-/// preference the user never asked for is worse than one extra tap.
-enum NeoThemeMode { system, light, dark }
+/// Two, not three, and derived from what is actually on screen. Denial's third
+/// setting — "follow the system" — resolves to a fixed brightness in this SDK
+/// version (`noPreference.effectiveBrightness` is `denialDefaultBrightness`,
+/// which is dark), so cycling through it made a tap that changed nothing. A
+/// control whose only feedback is invisible is worse than one that cannot
+/// express a state the platform does not implement; if that default ever starts
+/// following the portal preference, a third state becomes worth adding back.
+enum NeoThemeMode { light, dark }
 
-/// The mode the tile shows after tapping [current].
-NeoThemeMode neoNextThemeMode(NeoThemeMode current) => switch (current) {
-  NeoThemeMode.system => NeoThemeMode.light,
-  NeoThemeMode.light => NeoThemeMode.dark,
-  NeoThemeMode.dark => NeoThemeMode.system,
-};
+/// The mode currently in effect.
+NeoThemeMode neoThemeMode({required bool isDark}) =>
+    isDark ? NeoThemeMode.dark : NeoThemeMode.light;
+
+/// The mode the tile shows after tapping [current]. Always a visible change.
+NeoThemeMode neoNextThemeMode(NeoThemeMode current) =>
+    current == NeoThemeMode.dark ? NeoThemeMode.light : NeoThemeMode.dark;
 
 String neoThemeModeLabel(NeoThemeMode mode) => switch (mode) {
-  NeoThemeMode.system => '跟随系统',
   NeoThemeMode.light => '浅色',
   NeoThemeMode.dark => '深色',
 };
+
+/// One network interface as the wired-link rule needs it.
+///
+/// Read from sysfs plus a routable-address check, because Denial's network
+/// snapshot only describes the **Wi-Fi** device: its backend filters
+/// NetworkManager devices to `DeviceType == 2` and derives the connectivity
+/// status from that device's state, so a machine on Ethernet with the radio off
+/// reports `disconnected` even though it is online.
+class NeoLinkFacts {
+  const NeoLinkFacts({
+    required this.name,
+    required this.operState,
+    required this.wireless,
+    required this.physical,
+    required this.routable,
+  });
+
+  final String name;
+
+  /// Contents of `/sys/class/net/<name>/operstate`.
+  final String operState;
+
+  /// A `wireless` directory exists, i.e. the kernel says this is Wi-Fi.
+  final bool wireless;
+
+  /// A `device` symlink exists, which rules out bridges, veth pairs, bonds,
+  /// tunnels and other software interfaces that are not a cable.
+  final bool physical;
+
+  /// The interface currently holds a routable (non-link-local) address.
+  final bool routable;
+
+  @override
+  String toString() =>
+      'NeoLinkFacts($name, $operState, wireless: $wireless, '
+      'physical: $physical, routable: $routable)';
+}
+
+/// Whether any interface looks like an Ethernet link that is actually up.
+///
+/// Deliberately conservative: a link with no address is not "connected" to a
+/// user, and a wireless or virtual interface is never reported as wired.
+bool neoWiredLinkUp(List<NeoLinkFacts> links) {
+  for (final link in links) {
+    if (link.wireless || !link.physical || !link.routable) continue;
+    if (link.operState == 'up' || link.operState == 'unknown') return true;
+  }
+  return false;
+}
+
+/// What the pill's network slot shows.
+enum NeoNetworkGlyph {
+  /// A cable is up: shown even when Wi-Fi is also connected, because a wired
+  /// link is the state a user wants to notice.
+  ethernet,
+
+  /// Connected over Wi-Fi.
+  wifi,
+
+  /// Radio on, nothing joined.
+  offline,
+
+  /// Radio off.
+  wifiOff,
+}
+
+NeoNetworkGlyph neoNetworkGlyph({
+  required bool wiredUp,
+  required bool wifiConnected,
+  required bool wirelessEnabled,
+}) {
+  if (wiredUp) return NeoNetworkGlyph.ethernet;
+  if (wifiConnected) return NeoNetworkGlyph.wifi;
+  return wirelessEnabled ? NeoNetworkGlyph.offline : NeoNetworkGlyph.wifiOff;
+}
+
+/// One audio output the panel can switch to.
+class NeoAudioDevice {
+  const NeoAudioDevice({
+    required this.name,
+    required this.description,
+    required this.active,
+    required this.available,
+  });
+
+  final String name;
+  final String description;
+  final bool active;
+  final bool available;
+
+  @override
+  String toString() => 'NeoAudioDevice($description, active: $active)';
+}
+
+/// Outputs worth offering: the available ones, active first, then by name.
+///
+/// Unavailable outputs are dropped rather than greyed out: a sink that is not
+/// present cannot be selected, and a list of ports that are not plugged in
+/// pushes the one you want off the panel.
+List<NeoAudioDevice> neoAudioDeviceEntries(
+  List<NeoAudioDevice> devices, {
+  int limit = 6,
+}) {
+  final entries =
+      <NeoAudioDevice>[
+        for (final device in devices)
+          if (device.available) device,
+      ]..sort((a, b) {
+        if (a.active != b.active) return a.active ? -1 : 1;
+        final left = a.description.isEmpty ? a.name : a.description;
+        final right = b.description.isEmpty ? b.name : b.description;
+        final byName = left.toLowerCase().compareTo(right.toLowerCase());
+        return byName != 0 ? byName : a.name.compareTo(b.name);
+      });
+  return List<NeoAudioDevice>.unmodifiable(entries.take(limit < 0 ? 0 : limit));
+}
+
+/// One application's audio stream.
+class NeoAppStream {
+  const NeoAppStream({
+    required this.id,
+    required this.name,
+    required this.level,
+    required this.muted,
+  });
+
+  final int id;
+  final String name;
+  final double level;
+  final bool muted;
+
+  @override
+  String toString() => 'NeoAppStream($name, level: $level)';
+}
+
+/// Streams to show, one per id, ordered by name.
+///
+/// Ordered rather than taken as they arrive for the same reason the launcher's
+/// window icons are: the host rebuilds this list on every audio change, and a
+/// row that moves while it is being dragged is unusable.
+List<NeoAppStream> neoAppStreamEntries(
+  List<NeoAppStream> streams, {
+  int limit = 8,
+}) {
+  final unique = <int, NeoAppStream>{};
+  for (final stream in streams) {
+    unique.putIfAbsent(stream.id, () => stream);
+  }
+  final entries = unique.values.toList()
+    ..sort((a, b) {
+      final byName = a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      return byName != 0 ? byName : a.id.compareTo(b.id);
+    });
+  return List<NeoAppStream>.unmodifiable(entries.take(limit < 0 ? 0 : limit));
+}
 
 /// A session action the control centre can request.
 ///

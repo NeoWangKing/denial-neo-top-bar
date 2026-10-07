@@ -149,17 +149,208 @@ void main() {
     });
   });
 
-  group('neoNextThemeMode', () {
-    test('cycles through all three states and returns', () {
-      expect(neoNextThemeMode(NeoThemeMode.system), NeoThemeMode.light);
+  group('theme mode', () {
+    test('reads the effective brightness', () {
+      expect(neoThemeMode(isDark: true), NeoThemeMode.dark);
+      expect(neoThemeMode(isDark: false), NeoThemeMode.light);
+    });
+
+    test('every tap flips to the other state', () {
+      expect(neoNextThemeMode(NeoThemeMode.dark), NeoThemeMode.light);
       expect(neoNextThemeMode(NeoThemeMode.light), NeoThemeMode.dark);
-      expect(neoNextThemeMode(NeoThemeMode.dark), NeoThemeMode.system);
+      expect(
+        neoNextThemeMode(neoNextThemeMode(neoThemeMode(isDark: true))),
+        NeoThemeMode.dark,
+      );
     });
 
     test('every state has a label', () {
       for (final mode in NeoThemeMode.values) {
         expect(neoThemeModeLabel(mode), isNotEmpty);
       }
+    });
+  });
+
+  group('neoWiredLinkUp', () {
+    NeoLinkFacts link(
+      String name, {
+      String operState = 'up',
+      bool wireless = false,
+      bool physical = true,
+      bool routable = true,
+    }) => NeoLinkFacts(
+      name: name,
+      operState: operState,
+      wireless: wireless,
+      physical: physical,
+      routable: routable,
+    );
+
+    test('accepts an up physical link with an address', () {
+      expect(neoWiredLinkUp(<NeoLinkFacts>[link('enp5s0')]), isTrue);
+    });
+
+    test('rejects a wireless interface even when it is up', () {
+      expect(
+        neoWiredLinkUp(<NeoLinkFacts>[link('wlan0', wireless: true)]),
+        isFalse,
+      );
+    });
+
+    test('rejects a link that is down or has no address', () {
+      expect(
+        neoWiredLinkUp(<NeoLinkFacts>[link('enp5s0', operState: 'down')]),
+        isFalse,
+      );
+      expect(
+        neoWiredLinkUp(<NeoLinkFacts>[link('enp5s0', routable: false)]),
+        isFalse,
+      );
+    });
+
+    test('rejects software interfaces, which have no device symlink', () {
+      expect(
+        neoWiredLinkUp(<NeoLinkFacts>[
+          link('docker0', physical: false),
+          link('veth1a2b', physical: false),
+        ]),
+        isFalse,
+      );
+    });
+
+    test('accepts an interface whose driver reports unknown', () {
+      expect(
+        neoWiredLinkUp(<NeoLinkFacts>[link('enp5s0', operState: 'unknown')]),
+        isTrue,
+      );
+    });
+
+    test('finds one good link among many bad ones', () {
+      expect(
+        neoWiredLinkUp(<NeoLinkFacts>[
+          link('lo', physical: false),
+          link('wlan0', wireless: true),
+          link('enp5s0', operState: 'down'),
+          link('enx00e04c', operState: 'up'),
+        ]),
+        isTrue,
+      );
+    });
+
+    test('an empty list is not a wired link', () {
+      expect(neoWiredLinkUp(const <NeoLinkFacts>[]), isFalse);
+    });
+  });
+
+  group('neoNetworkGlyph', () {
+    test('a wired link wins over Wi-Fi', () {
+      expect(
+        neoNetworkGlyph(
+          wiredUp: true,
+          wifiConnected: true,
+          wirelessEnabled: true,
+        ),
+        NeoNetworkGlyph.ethernet,
+      );
+    });
+
+    test('Wi-Fi connected, then radio state', () {
+      expect(
+        neoNetworkGlyph(
+          wiredUp: false,
+          wifiConnected: true,
+          wirelessEnabled: true,
+        ),
+        NeoNetworkGlyph.wifi,
+      );
+      expect(
+        neoNetworkGlyph(
+          wiredUp: false,
+          wifiConnected: false,
+          wirelessEnabled: true,
+        ),
+        NeoNetworkGlyph.offline,
+      );
+      expect(
+        neoNetworkGlyph(
+          wiredUp: false,
+          wifiConnected: false,
+          wirelessEnabled: false,
+        ),
+        NeoNetworkGlyph.wifiOff,
+      );
+    });
+  });
+
+  group('audio lists', () {
+    NeoAudioDevice device(
+      String name, {
+      String description = '',
+      bool active = false,
+      bool available = true,
+    }) => NeoAudioDevice(
+      name: name,
+      description: description,
+      active: active,
+      available: available,
+    );
+
+    NeoAppStream stream(int id, String name, {double level = 0.5}) =>
+        NeoAppStream(id: id, name: name, level: level, muted: false);
+
+    test('drops unavailable outputs and puts the active one first', () {
+      final entries = neoAudioDeviceEntries(<NeoAudioDevice>[
+        device('hdmi', description: 'HDMI'),
+        device('usb', description: 'USB 耳機'),
+        device('analog', description: 'Analog', active: true),
+        device('ghost', description: 'Gone', available: false),
+      ]);
+      expect(entries.map((entry) => entry.name), <String>[
+        'analog',
+        'hdmi',
+        'usb',
+      ]);
+    });
+
+    test('orders outputs by name, falling back to the id', () {
+      final entries = neoAudioDeviceEntries(<NeoAudioDevice>[
+        device('b', description: 'Zeta'),
+        device('a', description: 'alpha'),
+      ]);
+      expect(entries.map((entry) => entry.description), <String>[
+        'alpha',
+        'Zeta',
+      ]);
+    });
+
+    test('orders application streams by name and keeps one row per id', () {
+      final entries = neoAppStreamEntries(<NeoAppStream>[
+        stream(2, 'firefox'),
+        stream(1, 'Discord'),
+        stream(2, 'firefox'),
+      ]);
+      expect(entries.map((entry) => entry.id), <int>[1, 2]);
+      expect(entries.map((entry) => entry.name), <String>[
+        'Discord',
+        'firefox',
+      ]);
+    });
+
+    test('caps both lists', () {
+      expect(
+        neoAudioDeviceEntries(<NeoAudioDevice>[
+          for (var index = 0; index < 10; index++) device('$index'),
+        ], limit: 3),
+        hasLength(3),
+      );
+      expect(
+        neoAppStreamEntries(<NeoAppStream>[
+          for (var index = 0; index < 10; index++) stream(index, 'app$index'),
+        ], limit: 3),
+        hasLength(3),
+      );
+      expect(neoAudioDeviceEntries(const <NeoAudioDevice>[]), isEmpty);
+      expect(neoAppStreamEntries(const <NeoAppStream>[]), isEmpty);
     });
   });
 

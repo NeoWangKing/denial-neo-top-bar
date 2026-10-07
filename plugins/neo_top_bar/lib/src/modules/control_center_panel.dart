@@ -66,7 +66,7 @@ void openControlCenterPanel({
 }
 
 /// Rows that can expand a detail list underneath themselves.
-enum _Detail { none, wifi, bluetooth }
+enum _Detail { none, volume, brightness, wifi, bluetooth }
 
 class NeoControlCenterPanel extends ConsumerStatefulWidget {
   const NeoControlCenterPanel({
@@ -97,6 +97,11 @@ class _NeoControlCenterPanelState extends ConsumerState<NeoControlCenterPanel> {
   String? _passwordSsid;
   final TextEditingController _password = TextEditingController();
 
+  /// Per-monitor brightness while those sliders are under the pointer, keyed by
+  /// monitor id. Same reason as [_brightnessDrag]: the committed value can lag
+  /// the knob, and reading it back mid-drag would fight the pointer.
+  final Map<int, double> _monitorBrightnessDrag = <int, double>{};
+
   /// Local brightness while the slider is under the pointer.
   ///
   /// The provider commits on a timer, so reading it back mid-drag would fight
@@ -116,13 +121,10 @@ class _NeoControlCenterPanelState extends ConsumerState<NeoControlCenterPanel> {
     final notifications = ref.watch(desktopNotificationsProvider);
     final settings = ref.watch(shellSettingsProvider);
     final power = ref.watch(sessionPowerProvider);
-    final colorScheme = settings.appearance.colorSchemePreference;
-    final dark = colorScheme.effectiveBrightness == Brightness.dark;
-    final themeMode = switch (colorScheme) {
-      DesktopColorSchemePreference.preferDark => NeoThemeMode.dark,
-      DesktopColorSchemePreference.preferLight => NeoThemeMode.light,
-      DesktopColorSchemePreference.noPreference => NeoThemeMode.system,
-    };
+    final dark =
+        settings.appearance.colorSchemePreference.effectiveBrightness ==
+        Brightness.dark;
+    final themeMode = neoThemeMode(isDark: dark);
 
     return NeoPopupSurface(
       services: widget.services,
@@ -135,10 +137,19 @@ class _NeoControlCenterPanelState extends ConsumerState<NeoControlCenterPanel> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _VolumeRow(),
+            _VolumeRow(
+              expanded: _detail == _Detail.volume,
+              onToggleDetail: () => _toggleDetail(_Detail.volume),
+            ),
+            if (_detail == _Detail.volume) ...[
+              const SizedBox(height: 10),
+              const _VolumeDetail(),
+            ],
             const SizedBox(height: 10),
             _BrightnessRow(
               monitorId: widget.monitorId,
+              expanded: _detail == _Detail.brightness,
+              onToggleDetail: () => _toggleDetail(_Detail.brightness),
               dragValue: _brightnessDrag,
               onDragStart: (value) => setState(() => _brightnessDrag = value),
               onDrag: (value) => setState(() => _brightnessDrag = value),
@@ -146,6 +157,16 @@ class _NeoControlCenterPanelState extends ConsumerState<NeoControlCenterPanel> {
                 setState(() => _brightnessDrag = null);
               },
             ),
+            if (_detail == _Detail.brightness) ...[
+              const SizedBox(height: 10),
+              _BrightnessDetail(
+                dragValues: _monitorBrightnessDrag,
+                onDragValue: (monitorId, value) =>
+                    setState(() => _monitorBrightnessDrag[monitorId] = value),
+                onDragValueEnd: (monitorId) =>
+                    setState(() => _monitorBrightnessDrag.remove(monitorId)),
+              ),
+            ],
             const SizedBox(height: 14),
             _TileGrid(
               tiles: <Widget>[
@@ -164,18 +185,7 @@ class _NeoControlCenterPanelState extends ConsumerState<NeoControlCenterPanel> {
                   onTap: ref
                       .read(networkConnectivityProvider.notifier)
                       .toggleWireless,
-                  onExpand: () {
-                    if (_detail == _Detail.wifi) {
-                      setState(() => _detail = _Detail.none);
-                      return;
-                    }
-                    setState(() => _detail = _Detail.wifi);
-                    // Opening the list also refreshes it: a scan is an explicit
-                    // radio action, and this panel is the only place that asks.
-                    unawaited(
-                      ref.read(networkConnectivityProvider.notifier).scan(),
-                    );
-                  },
+                  onExpand: () => _toggleDetail(_Detail.wifi),
                 ),
                 _ControlTile(
                   icon: bluetooth.powered
@@ -188,16 +198,7 @@ class _NeoControlCenterPanelState extends ConsumerState<NeoControlCenterPanel> {
                   enabled: bluetooth.serviceAvailable && bluetooth.available,
                   expanded: _detail == _Detail.bluetooth,
                   onTap: ref.read(bluetoothProvider.notifier).togglePower,
-                  onExpand: () {
-                    if (_detail == _Detail.bluetooth) {
-                      setState(() => _detail = _Detail.none);
-                      return;
-                    }
-                    setState(() => _detail = _Detail.bluetooth);
-                    if (bluetooth.powered) {
-                      unawaited(ref.read(bluetoothProvider.notifier).scan());
-                    }
-                  },
+                  onExpand: () => _toggleDetail(_Detail.bluetooth),
                 ),
                 _ControlTile(
                   icon: notifications.doNotDisturb
@@ -217,19 +218,17 @@ class _NeoControlCenterPanelState extends ConsumerState<NeoControlCenterPanel> {
                   title: '深浅模式',
                   subtitle: neoThemeModeLabel(themeMode),
                   active: dark,
-                  onTap: () {
-                    final next = neoNextThemeMode(themeMode);
-                    ref
-                        .read(shellSettingsProvider.notifier)
-                        .setColorSchemePreference(switch (next) {
-                          NeoThemeMode.system =>
-                            DesktopColorSchemePreference.noPreference,
-                          NeoThemeMode.light =>
-                            DesktopColorSchemePreference.preferLight,
-                          NeoThemeMode.dark =>
-                            DesktopColorSchemePreference.preferDark,
-                        });
-                  },
+                  // Always sets an explicit preference: the third setting,
+                  // "follow the system", renders as a fixed brightness in this
+                  // SDK version, so cycling through it produced taps that
+                  // changed nothing at all.
+                  onTap: () => ref
+                      .read(shellSettingsProvider.notifier)
+                      .setColorSchemePreference(
+                        neoNextThemeMode(themeMode) == NeoThemeMode.dark
+                            ? DesktopColorSchemePreference.preferDark
+                            : DesktopColorSchemePreference.preferLight,
+                      ),
                 ),
               ],
             ),
@@ -304,6 +303,32 @@ class _NeoControlCenterPanelState extends ConsumerState<NeoControlCenterPanel> {
     );
   }
 
+  /// Opens [detail], or closes it when it is already open.
+  ///
+  /// Opening the audio ones also asks the host for fresh data: the device and
+  /// per-application lists are only built when something asks, because a sink
+  /// list costs a D-Bus round trip and would otherwise run for every session
+  /// whether or not anyone looks at it.
+  void _toggleDetail(_Detail detail) {
+    final opening = _detail != detail;
+    setState(() => _detail = opening ? detail : _Detail.none);
+    if (!opening) return;
+    switch (detail) {
+      case _Detail.volume:
+        ref.read(audioDevicesProvider.notifier).refresh();
+        ref.read(appAudioProvider.notifier).refresh();
+      case _Detail.wifi:
+        unawaited(ref.read(networkConnectivityProvider.notifier).scan());
+      case _Detail.bluetooth:
+        if (ref.read(bluetoothProvider).powered) {
+          unawaited(ref.read(bluetoothProvider.notifier).scan());
+        }
+      case _Detail.brightness:
+      case _Detail.none:
+        break;
+    }
+  }
+
   static String _networkSubtitle(NetworkConnectivityState state) {
     final snapshot = state.snapshot;
     if (!snapshot.serviceAvailable) return '服务不可用';
@@ -356,6 +381,11 @@ class _NeoControlCenterPanelState extends ConsumerState<NeoControlCenterPanel> {
 
 /// Volume slider plus the speaker button that mutes it.
 class _VolumeRow extends ConsumerWidget {
+  const _VolumeRow({required this.expanded, required this.onToggleDetail});
+
+  final bool expanded;
+  final VoidCallback onToggleDetail;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final volume = ref.watch(neoVolumeProvider);
@@ -366,6 +396,8 @@ class _VolumeRow extends ConsumerWidget {
       label: neoVolumeLabel(volume.level, muted: muted),
       value: volume.ready ? volume.level : 0,
       enabled: volume.ready,
+      expanded: expanded,
+      onToggleDetail: onToggleDetail,
       onDragStart: (value) {
         controller.beginDrag();
         controller.setLevel(value);
@@ -385,6 +417,8 @@ class _VolumeRow extends ConsumerWidget {
 class _BrightnessRow extends ConsumerWidget {
   const _BrightnessRow({
     required this.monitorId,
+    required this.expanded,
+    required this.onToggleDetail,
     required this.dragValue,
     required this.onDragStart,
     required this.onDrag,
@@ -392,6 +426,8 @@ class _BrightnessRow extends ConsumerWidget {
   });
 
   final int monitorId;
+  final bool expanded;
+  final VoidCallback onToggleDetail;
   final double? dragValue;
   final ValueChanged<double> onDragStart;
   final ValueChanged<double> onDrag;
@@ -420,6 +456,8 @@ class _BrightnessRow extends ConsumerWidget {
       label: neoBrightnessLabel(level),
       value: level,
       enabled: target != null && !loading,
+      expanded: expanded,
+      onToggleDetail: onToggleDetail,
       onDragStart: (value) {
         if (target == null) return;
         onDragStart(value);
@@ -439,6 +477,313 @@ class _BrightnessRow extends ConsumerWidget {
   }
 }
 
+/// The volume row's icon, doubling as the handle that opens its detail list.
+class _SliderIcon extends StatefulWidget {
+  const _SliderIcon({
+    required this.icon,
+    required this.enabled,
+    required this.expanded,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final bool enabled;
+  final bool expanded;
+  final VoidCallback? onTap;
+
+  @override
+  State<_SliderIcon> createState() => _SliderIconState();
+}
+
+class _SliderIconState extends State<_SliderIcon> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShellTheme.of(context);
+    final active = _hovered || widget.expanded;
+    final color = !widget.enabled
+        ? theme.colors.glyphInactive
+        : (active ? theme.accent : theme.colors.textPrimary);
+    final content = Padding(
+      padding: const EdgeInsets.all(3),
+      child: Icon(widget.icon, size: 17, color: color),
+    );
+    if (widget.onTap == null) return content;
+    return Tooltip(
+      message: widget.expanded ? '收起详细设置' : '展开详细设置',
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: widget.onTap,
+          child: AnimatedContainer(
+            duration: Motion.cardSettle,
+            curve: Motion.standard,
+            decoration: BoxDecoration(
+              color: active
+                  ? theme.colors.chip.withValues(alpha: 0.7)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(theme.roundButtonRadius),
+            ),
+            child: content,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Output devices and per-application levels, under the volume slider.
+class _VolumeDetail extends ConsumerWidget {
+  const _VolumeDetail();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = ShellTheme.of(context);
+    final devices = ref.watch(audioDevicesProvider);
+    final apps = ref.watch(appAudioProvider);
+    final deviceController = ref.read(audioDevicesProvider.notifier);
+
+    final outputs = neoAudioDeviceEntries(<NeoAudioDevice>[
+      for (final device in devices.devices)
+        NeoAudioDevice(
+          name: device.name,
+          description: device.description,
+          active: device.active,
+          available: device.available,
+        ),
+    ]);
+    final streams = neoAppStreamEntries(<NeoAppStream>[
+      for (final stream in apps.streams)
+        NeoAppStream(
+          id: stream.id,
+          name: stream.name,
+          level: stream.level,
+          muted: stream.muted,
+        ),
+    ]);
+
+    return _DetailCard(
+      title: '输出与应用程序',
+      action: NeoPopupIconButton(
+        icon: Icons.refresh,
+        tooltip: '重新读取',
+        onPressed: () {
+          deviceController.refresh();
+          ref.read(appAudioProvider.notifier).refresh();
+        },
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (outputs.isEmpty)
+            _DetailNote(text: devices.loading ? '正在读取输出设备…' : '没有可用的输出设备')
+          else
+            for (final device in outputs)
+              _DetailRow(
+                icon: device.active ? Icons.speaker : Icons.speaker_outlined,
+                title: device.description.isEmpty
+                    ? device.name
+                    : device.description,
+                subtitle: device.active ? '正在使用' : '切换',
+                highlighted: device.active,
+                onTap: () => deviceController.select(device.name),
+              ),
+          if (streams.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Divider(height: 1, color: theme.colors.hairlineSoft),
+            const SizedBox(height: 4),
+            for (final stream in streams)
+              _StreamRow(
+                stream: stream,
+                onChanged: (value) => ref
+                    .read(appAudioProvider.notifier)
+                    .setVolume(stream.id, value),
+                onCommitted: (value) => ref
+                    .read(appAudioProvider.notifier)
+                    .commitVolume(stream.id, value),
+              ),
+          ] else if (!apps.loading)
+            _DetailNote(text: '当前没有应用程序在播放'),
+          if (apps.error case final error?) _DetailNote(text: error),
+          if (devices.error case final error?) _DetailNote(text: error),
+        ],
+      ),
+    );
+  }
+}
+
+class _StreamRow extends StatelessWidget {
+  const _StreamRow({
+    required this.stream,
+    required this.onChanged,
+    required this.onCommitted,
+  });
+
+  final NeoAppStream stream;
+  final ValueChanged<double> onChanged;
+  final ValueChanged<double> onCommitted;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShellTheme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              stream.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.text.systemBarValue.copyWith(
+                fontSize: 11.5,
+                color: theme.colors.textSecondary,
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 120,
+            child: _NeoSlider(
+              value: stream.level.clamp(0.0, 1.0).toDouble(),
+              onDragStart: onChanged,
+              onDrag: onChanged,
+              onDragEnd: onCommitted,
+            ),
+          ),
+          SizedBox(
+            width: 34,
+            child: Text(
+              neoVolumeLabel(stream.level, muted: stream.muted),
+              textAlign: TextAlign.right,
+              style: theme.text.systemBarCaption.copyWith(
+                fontSize: 10.5,
+                color: theme.colors.textTertiary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One brightness slider per display.
+class _BrightnessDetail extends ConsumerWidget {
+  const _BrightnessDetail({
+    required this.dragValues,
+    required this.onDragValue,
+    required this.onDragValueEnd,
+  });
+
+  final Map<int, double> dragValues;
+  final void Function(int monitorId, double value) onDragValue;
+  final ValueChanged<int> onDragValueEnd;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = ShellTheme.of(context);
+    final outputs =
+        ref.watch(displayLayoutProvider)?.outputs ?? const <DisplayOutput>[];
+    final brightness = ref.watch(displayBrightnessProvider);
+    final controller = ref.read(displayBrightnessProvider.notifier);
+
+    if (outputs.isEmpty) {
+      return _DetailCard(
+        title: '显示器亮度',
+        child: const _DetailNote(text: '没有检测到显示器'),
+      );
+    }
+    return _DetailCard(
+      title: '显示器亮度',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final output in outputs)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      output.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.text.systemBarValue.copyWith(
+                        fontSize: 11.5,
+                        color: theme.colors.textSecondary,
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 120,
+                    child: _NeoSlider(
+                      value:
+                          dragValues[output.monitorId] ??
+                          brightness.levels[output.monitorId] ??
+                          0.72,
+                      enabled: !brightness.loading.contains(output.monitorId),
+                      onDragStart: (value) {
+                        onDragValue(output.monitorId, value);
+                        controller.setLevel(output, value);
+                      },
+                      onDrag: (value) {
+                        onDragValue(output.monitorId, value);
+                        controller.setLevel(output, value);
+                      },
+                      onDragEnd: (value) {
+                        onDragValueEnd(output.monitorId);
+                        controller.commitLevel(output, value);
+                      },
+                    ),
+                  ),
+                  SizedBox(
+                    width: 34,
+                    child: Text(
+                      neoBrightnessLabel(
+                        dragValues[output.monitorId] ??
+                            brightness.levels[output.monitorId] ??
+                            0.72,
+                      ),
+                      textAlign: TextAlign.right,
+                      style: theme.text.systemBarCaption.copyWith(
+                        fontSize: 10.5,
+                        color: theme.colors.textTertiary,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DetailNote extends StatelessWidget {
+  const _DetailNote({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShellTheme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Text(
+        text,
+        style: theme.text.systemBarCaption.copyWith(
+          color: theme.colors.textTertiary,
+        ),
+      ),
+    );
+  }
+}
+
 /// One labelled slider, the shape both rows above share.
 class _SliderRow extends StatelessWidget {
   const _SliderRow({
@@ -450,6 +795,8 @@ class _SliderRow extends StatelessWidget {
     required this.onDragEnd,
     this.enabled = true,
     this.trailing,
+    this.expanded = false,
+    this.onToggleDetail,
   });
 
   final IconData icon;
@@ -461,17 +808,24 @@ class _SliderRow extends StatelessWidget {
   final bool enabled;
   final Widget? trailing;
 
+  /// Whether this row's detail list is open.
+  final bool expanded;
+
+  /// Tapping the icon opens that detail list. Drawing the icon as the affordance
+  /// keeps the slider itself free for dragging: a row where the knob and the
+  /// expander are the same hit target makes one of them unusable.
+  final VoidCallback? onToggleDetail;
+
   @override
   Widget build(BuildContext context) {
     final theme = ShellTheme.of(context);
     return Row(
       children: [
-        Icon(
-          icon,
-          size: 17,
-          color: enabled
-              ? theme.colors.textPrimary
-              : theme.colors.glyphInactive,
+        _SliderIcon(
+          icon: icon,
+          enabled: enabled,
+          expanded: expanded,
+          onTap: onToggleDetail,
         ),
         const SizedBox(width: 10),
         Expanded(
