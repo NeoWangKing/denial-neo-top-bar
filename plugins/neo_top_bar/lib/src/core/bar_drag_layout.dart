@@ -59,6 +59,13 @@ class NeoPlacedPill {
 ///
 /// Pills keep the order they appear in [pills]; a zone that ends up empty simply
 /// places nothing, so the other zones keep their own edges.
+///
+/// A pill with a zero extent — a module that renders nothing right now, such as
+/// the media pill with no player or an empty tray — is still *placed*, at the
+/// zone's leading edge and with no width, but it reserves neither room nor a
+/// gap. It has to stay in the tree: the bar learns that such a pill came back by
+/// measuring it, so unmounting it would leave it unable to return. What it must
+/// not do is hold open a hole where it used to be.
 Map<String, NeoPlacedPill> neoDragLayout({
   required List<NeoPillBox> pills,
   required double mainExtent,
@@ -78,11 +85,18 @@ Map<String, NeoPlacedPill> neoDragLayout({
     ];
     if (inZone.isEmpty) continue;
 
+    // Only the pills that occupy room take part in the run: gaps are counted
+    // between *these*, not between every placement.
+    final sized = <NeoPillBox>[
+      for (final pill in inZone)
+        if (pill.extent > 0) pill,
+    ];
+
     var total = 0.0;
-    for (final pill in inZone) {
+    for (final pill in sized) {
       total += pill.extent;
     }
-    total += gap * (inZone.length - 1);
+    if (sized.length > 1) total += gap * (sized.length - 1);
 
     final start = switch (zone) {
       // The bar spreads its zones with spaceBetween, so the centre zone is
@@ -94,7 +108,7 @@ Map<String, NeoPlacedPill> neoDragLayout({
     };
 
     var cursor = start;
-    for (final pill in inZone) {
+    for (final pill in sized) {
       placed[pill.id] = NeoPlacedPill(
         main: cursor,
         cross: crossPadding,
@@ -103,6 +117,38 @@ Map<String, NeoPlacedPill> neoDragLayout({
       );
       cursor += pill.extent + gap;
     }
+    for (final pill in inZone) {
+      if (pill.extent > 0) continue;
+      placed[pill.id] = NeoPlacedPill(
+        main: start,
+        cross: crossPadding,
+        extent: 0,
+        crossExtent: crossSize,
+      );
+    }
   }
   return placed;
+}
+
+/// Whether [pills] fit in [mainExtent], by the same rules [neoDragLayout] lays
+/// them out with: padding at both ends, [gap] between the pills that occupy
+/// room, and zero-extent pills ignored entirely.
+///
+/// The two must agree, or the bar would flip between the explicit layout and
+/// the scrolling one for a set of pills that fits.
+bool neoPillsFit({
+  required List<NeoPillBox> pills,
+  required double mainExtent,
+  required double mainPadding,
+  required double gap,
+}) {
+  var total = mainPadding * 2;
+  var counted = 0;
+  for (final pill in pills) {
+    if (pill.extent <= 0) continue;
+    total += pill.extent;
+    if (counted > 0) total += gap;
+    counted++;
+  }
+  return total <= mainExtent;
 }

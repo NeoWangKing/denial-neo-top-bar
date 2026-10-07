@@ -8,6 +8,9 @@ import 'package:denial_flutter_sdk/services.dart';
 import 'package:denial_flutter_sdk/theme.dart';
 import 'package:flutter/gestures.dart' show kPrimaryButton, kSecondaryButton;
 import 'package:flutter/material.dart';
+// `_RenderPillSizeReporter` is a render object, and `widgets.dart` re-exports
+// only a slice of the rendering library.
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/config.dart';
@@ -125,7 +128,6 @@ class _NeoTopBarState extends ConsumerState<NeoTopBar> {
   }
 }
 
-/// One visible pill, in bar order.
 /// Eased motion for picking a pill up: it grows and slides until it is centred
 /// under the pointer.
 ///
@@ -136,14 +138,21 @@ class _NeoTopBarState extends ConsumerState<NeoTopBar> {
 /// A symmetric emphasised ease, shortened rather than replaced: the decelerating
 /// curves start far too fast (Motion.md3EmphasizedDecelerate covers most of the
 /// distance in the first tenth), which is the snap this is meant to avoid.
+const Duration _pickUpDuration = Duration(milliseconds: 360);
+const Curve _pickUpCurve = Motion.md3Emphasized;
+
 /// Padding between the strip's edge and the outermost pill, along the bar and
 /// across it. Shared by both layouts and by the drag preview so they agree.
 const double _mainPadding = 8;
 const double _crossPadding = 5;
 
-const Duration _pickUpDuration = Duration(milliseconds: 360);
-const Curve _pickUpCurve = Motion.md3Emphasized;
+/// Space between two pills along the bar, scaled with the configured density.
+///
+/// One function so the fitted check, the explicit layout and the flex fallback
+/// cannot drift apart.
+double _gap(double density) => 6 * density;
 
+/// One visible pill, in bar order.
 class _PillSlot {
   const _PillSlot({required this.id, required this.zone, required this.key});
 
@@ -187,11 +196,15 @@ class _BarContentState extends State<_BarContent>
   /// Measured size of each visible pill along the bar's main axis.
   ///
   /// Explicit positioning has to know a pill's size before placing it, and that
-  /// size comes from the pill's own content. It is read one frame behind, which
-  /// is why the flex layout stays as a fallback rather than as dead code.
+  /// size comes from the pill's own content. Pills report their own size from
+  /// the layout pass ([_PillSizeReporter]), so this is refreshed whenever a size
+  /// actually changes — including in frames the bar itself does not rebuild.
+  /// A missing entry means "not measured yet"; a **zero** entry means the pill
+  /// renders nothing right now, which the layout treats as "no room, no gap".
   Map<String, double> _pillExtents = const <String, double>{};
 
-  bool _measureScheduled = false;
+  /// Whether a rebuild has been asked for after the current frame.
+  bool _relayoutScheduled = false;
 
   /// Visible pills in bar order, refreshed on every non-drag build.
   List<_PillSlot> _slots = const <_PillSlot>[];
@@ -561,20 +574,23 @@ class _BarContentState extends State<_BarContent>
           // flex layout is the fallback for the first frame and for a bar whose
           // content is too wide to place, where scrolling matters more than
           // animation.
-          final extents = _knownExtents(visible);
-          if (extents != null &&
-              _fitsInStrip(size, visible, extents, density)) {
+          final boxes = _pillBoxes(visible);
+          if (boxes != null &&
+              neoPillsFit(
+                pills: boxes,
+                mainExtent: horizontal ? size.width : size.height,
+                mainPadding: _mainPadding,
+                gap: _gap(density),
+              )) {
             return _buildPositionedLayout(
               context: context,
               theme: theme,
               size: size,
-              visible: visible,
-              extents: extents,
+              boxes: boxes,
               moduleContext: moduleContext,
               density: density,
             );
           }
-          _scheduleMeasure();
           return _buildFlexLayout(
             context: context,
             theme: theme,
@@ -589,62 +605,70 @@ class _BarContentState extends State<_BarContent>
   }
 
   /// The measured size of every visible pill, or null when one is still unknown.
-  Map<String, double>? _knownExtents(List<NeoModulePlacement> visible) {
-    final extents = <String, double>{};
+  ///
+  /// A missing entry means "not measured yet", which is different from a
+  /// measured zero: zero is a pill that renders nothing right now, and the
+  /// layout is expected to place it without giving it room.
+  List<NeoPillBox>? _pillBoxes(List<NeoModulePlacement> visible) {
+    final boxes = <NeoPillBox>[];
     for (final placement in visible) {
-      final extent = _pillExtents[placement.descriptor.id];
+      final id = placement.descriptor.id;
+      final extent = _pillExtents[id];
       if (extent == null) return null;
-      extents[placement.descriptor.id] = extent;
+      boxes.add(NeoPillBox(id: id, zone: placement.zone, extent: extent));
     }
-    return extents;
+    return boxes;
   }
 
-  /// Whether every pill fits with the zones still apart.
+  /// Records a pill's size, straight from the layout pass that produced it.
   ///
-  /// A pill sizes itself from its content — a clock, a percentage, the tray — so
-  /// the sum is the only cheap guarantee that explicit positioning cannot overlap
-  /// two zones. When it does not fit, the flex layout scrolls instead.
-  bool _fitsInStrip(
-    Size size,
-    List<NeoModulePlacement> visible,
-    Map<String, double> extents,
-    double density,
-  ) {
-    final main = _horizontal ? size.width : size.height;
-    var total = _mainPadding * 2;
-    for (var index = 0; index < visible.length; index++) {
-      total += extents[visible[index].descriptor.id]!;
-      if (index > 0) total += 6 * density;
-    }
-    return total <= main;
+  /// Always one frame behind by construction — the value can only be used by the
+  /// next build — which is why the flex layout is a fallback rather than a
+  /// special case: the two agree on positions, so falling back for a frame is
+  /// invisible, and a content change is corrected the frame after it happens.
+  void _reportPillExtent(String id, double extent) {
+    if (_pillExtents[id] == extent) return;
+    // Written without `setState` on purpose: this arrives from `performLayout`,
+    // where marking the bar dirty is illegal, and the value cannot be used
+    // before the next build anyway. The rebuild is requested below.
+    _pillExtents = <String, double>{..._pillExtents, id: extent};
+    _requestRelayout();
   }
 
-  /// Reads each pill's laid-out size, for the next frame's explicit layout.
+  /// Rebuilds the bar after the current frame, the earliest legal moment.
   ///
-  /// One frame behind by construction, which is why the flex layout is a
-  /// fallback rather than a special case: the two agree on positions, so falling
-  /// back for a frame is invisible, and a content change is corrected the frame
-  /// after it happens.
-  void _scheduleMeasure() {
-    if (_measureScheduled) return;
-    _measureScheduled = true;
+  /// Coalesced: several pills may report in the same layout pass, and one
+  /// rebuild serves all of them.
+  void _requestRelayout() {
+    if (_relayoutScheduled) return;
+    _relayoutScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _measureScheduled = false;
-      if (!mounted) return;
-      final horizontal = _horizontal;
-      final next = <String, double>{};
-      var changed = false;
-      for (final slot in _slots) {
-        final box = slot.key.currentContext?.findRenderObject();
-        if (box is! RenderBox || !box.attached || !box.hasSize) continue;
-        final extent = horizontal ? box.size.width : box.size.height;
-        next[slot.id] = extent;
-        if (_pillExtents[slot.id] != extent) changed = true;
-      }
-      if (next.length != _pillExtents.length) changed = true;
-      if (changed) setState(() => _pillExtents = next);
+      _relayoutScheduled = false;
+      if (mounted) setState(() {});
     });
   }
+
+  /// Wraps a pill so the bar hears about its size from the layout pass itself.
+  ///
+  /// A pill's size is decided by its own content: the tray grows and shrinks as
+  /// status items come and go, the clock's width changes when the minute rolls
+  /// over, the media pill collapses when playback stops. Those changes happen in
+  /// a frame where only the *pill* is rebuilt — the bar is not dirty — so
+  /// measuring from a callback scheduled by the bar's `build` never runs for
+  /// that frame, and the layout keeps placing pills by a width that is no longer
+  /// true. The symptom is specific and was reported as a bug: the tray pill
+  /// shrinks in place instead of hugging the trailing edge, so the gap in front
+  /// of it stays bigger than every other gap; and a pill that stops rendering
+  /// keeps a hole the size it used to be.
+  ///
+  /// `performLayout` is the one place where the new size is knowable whatever
+  /// caused it, in whichever frame it happens, which is why the report is taken
+  /// from there rather than from a `SizeChangedLayoutNotifier`.
+  Widget _reportSizeOf(String id, Widget pill) => _PillSizeReporter(
+    horizontal: _horizontal,
+    onExtent: (extent) => _reportPillExtent(id, extent),
+    child: pill,
+  );
 
   /// The resting layout, with every pill at an explicit offset.
   ///
@@ -656,38 +680,37 @@ class _BarContentState extends State<_BarContent>
     required BuildContext context,
     required ShellThemeData theme,
     required Size size,
-    required List<NeoModulePlacement> visible,
-    required Map<String, double> extents,
+    required List<NeoPillBox> boxes,
     required NeoModuleContext moduleContext,
     required double density,
   }) {
     final horizontal = _horizontal;
     final draggingId = _draggingId;
     final placed = neoDragLayout(
-      pills: <NeoPillBox>[
-        for (final placement in visible)
-          NeoPillBox(
-            id: placement.descriptor.id,
-            zone: placement.zone,
-            extent: extents[placement.descriptor.id]!,
-          ),
-      ],
+      pills: boxes,
       mainExtent: horizontal ? size.width : size.height,
       crossExtent: horizontal ? size.height : size.width,
       mainPadding: _mainPadding,
       crossPadding: _crossPadding,
-      gap: 6 * density,
+      gap: _gap(density),
     );
 
     final pointer = _pointerLocal;
     final slots = <_PillSlot>[];
     final children = <Widget>[];
-    for (final placement in visible) {
-      final id = placement.descriptor.id;
+    // The pill the user is holding is collected separately: it is lifted, so it
+    // has to paint above the rest of the bar. A `Stack` paints in list order,
+    // and this one sits at its *preview* position in `boxes` — which put it
+    // under every pill that follows it, and under the ghost as well. The pill
+    // under the pointer sliding beneath its neighbours is exactly what was
+    // reported.
+    final lifted = <Widget>[];
+    for (final box in boxes) {
+      final id = box.id;
       final at = placed[id];
       if (at == null) continue;
       final key = _keyFor(id);
-      slots.add(_PillSlot(id: id, zone: placement.zone, key: key));
+      slots.add(_PillSlot(id: id, zone: box.zone, key: key));
 
       final held = id == draggingId && pointer != null;
       final heldCentre = held ? _feedbackCentre(pointer) : null;
@@ -700,23 +723,24 @@ class _BarContentState extends State<_BarContent>
       final cross = heldCentre == null
           ? at.cross
           : (horizontal ? heldCentre.dy : heldCentre.dx) - at.crossExtent / 2;
-      children.add(
-        AnimatedPositioned(
-          key: ValueKey<String>('neo-pill-$id'),
-          // Zero while held: the grab animation already carries that pill, and
-          // letting the layout chase it too would ease everything twice. The
-          // moment the drag ends this returns to the settle duration, which is
-          // what glides the pill from the pointer into its new slot.
-          duration: held ? Duration.zero : Motion.cardSettle,
-          curve: Motion.standard,
-          left: horizontal ? main : cross,
-          top: horizontal ? cross : main,
-          // Positioned by its leading edge with no size along the main axis, so a
-          // pill keeps sizing itself from its content; the measured extent is only
-          // used to work out where the next pill goes.
-          width: horizontal ? null : at.crossExtent,
-          height: horizontal ? at.crossExtent : null,
-          child: _DraggablePill(
+      final pill = AnimatedPositioned(
+        key: ValueKey<String>('neo-pill-$id'),
+        // Zero while held: the grab animation already carries that pill, and
+        // letting the layout chase it too would ease everything twice. The
+        // moment the drag ends this returns to the settle duration, which is
+        // what glides the pill from the pointer into its new slot.
+        duration: held ? Duration.zero : Motion.cardSettle,
+        curve: Motion.standard,
+        left: horizontal ? main : cross,
+        top: horizontal ? cross : main,
+        // Positioned by its leading edge with no size along the main axis, so a
+        // pill keeps sizing itself from its content; the measured extent is only
+        // used to work out where the next pill goes.
+        width: horizontal ? null : at.crossExtent,
+        height: horizontal ? at.crossExtent : null,
+        child: _reportSizeOf(
+          id,
+          _DraggablePill(
             key: key,
             id: id,
             onDragStart: _startDrag,
@@ -727,11 +751,13 @@ class _BarContentState extends State<_BarContent>
           ),
         ),
       );
+      (held ? lifted : children).add(pill);
     }
     _slots = slots;
-    _scheduleMeasure();
 
-    // The silhouette marking the gap the held pill would drop into.
+    // The silhouette marking the gap the held pill would drop into. Above the
+    // resting pills — it is in a free slot, so it must not be hidden by a
+    // neighbour if the layout has not settled yet — but below the lifted pill.
     if (draggingId != null && placed[draggingId] != null) {
       final at = placed[draggingId]!;
       children.add(
@@ -747,6 +773,7 @@ class _BarContentState extends State<_BarContent>
         ),
       );
     }
+    children.addAll(lifted);
 
     return Stack(key: _stripKey, children: children);
   }
@@ -770,14 +797,17 @@ class _BarContentState extends State<_BarContent>
       final key = _keyFor(id);
       slots.add(_PillSlot(id: id, zone: placement.zone, key: key));
       (zones[placement.zone] ??= <Widget>[]).add(
-        _DraggablePill(
-          key: key,
-          id: id,
-          onDragStart: _startDrag,
-          onDragUpdate: _updateDrag,
-          onDragEnd: _endDrag,
-          onDragCancel: _clearDrag,
-          child: _module(context, moduleContext, id),
+        _reportSizeOf(
+          id,
+          _DraggablePill(
+            key: key,
+            id: id,
+            onDragStart: _startDrag,
+            onDragUpdate: _updateDrag,
+            onDragEnd: _endDrag,
+            onDragCancel: _clearDrag,
+            child: _module(context, moduleContext, id),
+          ),
         ),
       );
     }
@@ -800,8 +830,8 @@ class _BarContentState extends State<_BarContent>
           for (var index = 0; index < widgets.length; index++) ...[
             if (index > 0)
               SizedBox(
-                width: horizontal ? 6 * density : 0,
-                height: horizontal ? 0 : 6 * density,
+                width: horizontal ? _gap(density) : 0,
+                height: horizontal ? 0 : _gap(density),
               ),
             widgets[index],
           ],
@@ -1020,6 +1050,68 @@ class _DraggablePillState extends State<_DraggablePill>
         ),
       ),
     );
+  }
+}
+
+/// Reports a pill's size along the bar's main axis, from inside the layout pass.
+///
+/// The bar places pills by their measured size, and a pill's size is decided by
+/// its own content, in frames the bar itself does not rebuild. `performLayout`
+/// is the only place where the new size is knowable whatever changed it, so the
+/// report is taken here rather than from a post-frame read or a
+/// `SizeChangedLayoutNotifier`: there is nothing to schedule and nothing to
+/// interpret, the size simply is what it is at that moment.
+///
+/// It reports **only on change**, and only the main axis. The cross axis is
+/// fixed by the layout (`AnimatedPositioned` gives the pill an explicit cross
+/// size), so a change there carries no information; the first layout always
+/// reports, which is what fills the bar's table of sizes on start-up.
+///
+/// The callback runs during layout and must therefore not rebuild anything
+/// synchronously — `_reportPillExtent` records the value and asks for a rebuild
+/// after the frame.
+class _PillSizeReporter extends SingleChildRenderObjectWidget {
+  const _PillSizeReporter({
+    required this.horizontal,
+    required this.onExtent,
+    required super.child,
+  });
+
+  /// Which of the pill's dimensions is the bar's main axis.
+  final bool horizontal;
+
+  final ValueChanged<double> onExtent;
+
+  @override
+  _RenderPillSizeReporter createRenderObject(BuildContext context) =>
+      _RenderPillSizeReporter(horizontal: horizontal, onExtent: onExtent);
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    _RenderPillSizeReporter renderObject,
+  ) {
+    renderObject
+      ..horizontal = horizontal
+      ..onExtent = onExtent;
+  }
+}
+
+class _RenderPillSizeReporter extends RenderProxyBox {
+  _RenderPillSizeReporter({required this.horizontal, required this.onExtent});
+
+  bool horizontal;
+  ValueChanged<double> onExtent;
+
+  Size? _reported;
+
+  @override
+  void performLayout() {
+    super.performLayout();
+    final size = this.size;
+    if (size == _reported) return;
+    _reported = size;
+    onExtent(horizontal ? size.width : size.height);
   }
 }
 

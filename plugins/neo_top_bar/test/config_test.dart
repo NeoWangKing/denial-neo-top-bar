@@ -832,5 +832,87 @@ void main() {
       expect(after['b']!.main, 8 + 100 + 6);
       expect(after['c']!.main, 1000 - 8 - 40);
     });
+
+    test('a pill that renders nothing reserves neither room nor a gap', () {
+      // The media pill with no player, an empty tray: still placed — it has to
+      // stay mounted to be able to come back — but collapsed and taking no gap.
+      final placed = layout(const <NeoPillBox>[
+        NeoPillBox(id: 'tray', zone: NeoZone.end, extent: 100),
+        NeoPillBox(id: 'media', zone: NeoZone.end, extent: 0),
+        NeoPillBox(id: 'battery', zone: NeoZone.end, extent: 60),
+      ]);
+      // Only two pills occupy room, so exactly one gap: the same as if the
+      // hidden pill did not exist at all.
+      expect(placed['battery']!.main, 1000 - 8 - 60);
+      expect(placed['tray']!.main, 1000 - 8 - 166);
+      expect(placed['media']!.extent, 0);
+      expect(placed['media']!.main, 1000 - 8 - 166);
+      // Three pills of these widths with two gaps would have been 4px further
+      // left for the tray, which is the hole this rule removes.
+      expect(placed['tray']!.main, isNot(1000 - 8 - 172));
+    });
+
+    test('a zero-extent pill in an otherwise empty zone is still placed', () {
+      final placed = layout(const <NeoPillBox>[
+        NeoPillBox(id: 'ghost', zone: NeoZone.center, extent: 0),
+      ]);
+      expect(placed['ghost']!.extent, 0);
+      expect(placed['ghost']!.main, 500);
+    });
+
+    test('the centre zone centres the pills that occupy room', () {
+      final placed = layout(const <NeoPillBox>[
+        NeoPillBox(id: 'ghost', zone: NeoZone.center, extent: 0),
+        NeoPillBox(id: 'real', zone: NeoZone.center, extent: 100),
+      ]);
+      expect(placed['real']!.main, 450);
+      expect(placed['ghost']!.main, 450);
+    });
+  });
+
+  group('neoPillsFit', () {
+    bool fits(List<NeoPillBox> pills, double main) =>
+        neoPillsFit(pills: pills, mainExtent: main, mainPadding: 8, gap: 6);
+
+    test('counts both paddings and the gaps between sized pills', () {
+      // 8 + 100 + 6 + 50 + 8 = 172
+      const pills = <NeoPillBox>[
+        NeoPillBox(id: 'a', zone: NeoZone.start, extent: 100),
+        NeoPillBox(id: 'b', zone: NeoZone.end, extent: 50),
+      ];
+      expect(fits(pills, 172), isTrue);
+      expect(fits(pills, 171), isFalse);
+    });
+
+    test('ignores pills that occupy no room', () {
+      const pills = <NeoPillBox>[
+        NeoPillBox(id: 'a', zone: NeoZone.start, extent: 100),
+        NeoPillBox(id: 'ghost', zone: NeoZone.start, extent: 0),
+        NeoPillBox(id: 'b', zone: NeoZone.start, extent: 50),
+      ];
+      // One gap, not two: 8 + 100 + 6 + 50 + 8.
+      expect(fits(pills, 172), isTrue);
+      expect(fits(pills, 171), isFalse);
+    });
+
+    test('one pill needs no gap', () {
+      expect(
+        fits(const <NeoPillBox>[
+          NeoPillBox(id: 'a', zone: NeoZone.start, extent: 100),
+        ], 116),
+        isTrue,
+      );
+      expect(
+        fits(const <NeoPillBox>[
+          NeoPillBox(id: 'a', zone: NeoZone.start, extent: 100),
+        ], 115),
+        isFalse,
+      );
+    });
+
+    test('an empty bar fits anything, including nothing', () {
+      expect(fits(const <NeoPillBox>[], 16), isTrue);
+      expect(fits(const <NeoPillBox>[], 15), isFalse);
+    });
   });
 }
