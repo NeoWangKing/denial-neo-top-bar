@@ -31,7 +31,6 @@ import '../core/module_descriptor.dart';
 import '../core/module_registry.dart';
 import '../core/zone_board.dart';
 import 'neo_popup_surface.dart';
-import 'neo_setting_controls.dart';
 
 /// Opens the settings card, centered in the bar's output.
 ///
@@ -325,9 +324,15 @@ class _ZoneSection extends StatelessWidget {
 /// How a card looks while it is being dragged.
 ///
 /// The default decorator wraps the child in a `Material`, which this shell has no
-/// use for: the bar's surfaces are glass, not Material, and an elevation shadow
-/// would be the only one on screen. A slight scale and an accent ring read as
-/// "lifted" in the same language as the bar's own drag.
+/// use for: an elevation shadow drawn by Material would be the only one on
+/// screen, and the bar's own drag has no such thing.
+///
+/// The lift is a scale plus a soft shadow, deliberately **not** a border. The
+/// item box is the card *plus the gap under it* — a reorderable list has no
+/// per-item spacing, so the gap belongs to the item — and a hard outline drawn
+/// around that box is visibly offset from the card it is supposed to outline.
+/// A blurred shadow around the same box reads as centred on the card, which is
+/// also why Material's own elevation looks right here.
 Widget _draggedCardDecorator(
   Widget child,
   int index,
@@ -336,14 +341,19 @@ Widget _draggedCardDecorator(
   animation: animation,
   builder: (context, _) {
     final theme = ShellTheme.of(context);
+    final lift = animation.value;
     return Transform.scale(
-      scale: 1 + 0.01 * animation.value,
+      scale: 1 + 0.012 * lift,
       child: DecoratedBox(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(theme.chipRadius),
-          border: Border.all(
-            color: theme.accent.withValues(alpha: 0.75 * animation.value),
-          ),
+          boxShadow: <BoxShadow>[
+            BoxShadow(
+              color: theme.colors.shadow.withValues(alpha: 0.45 * lift),
+              blurRadius: 22 * lift,
+              spreadRadius: 1,
+            ),
+          ],
         ),
         child: child,
       ),
@@ -392,7 +402,9 @@ class _ModuleCardState extends State<_ModuleCard> {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(6, 10, 12, 10),
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            // The grip sits at the card's vertical middle rather than under its
+            // top edge, which is where the eye looks for a drag handle.
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               ReorderableDragStartListener(
                 index: widget.index,
@@ -434,11 +446,15 @@ class _ModuleCardState extends State<_ModuleCard> {
                             ),
                           ),
                           const SizedBox(width: 10),
-                          NeoSettingToggle(
-                            value: widget.placement.enabled,
-                            onChanged: (value) => widget.state.setEnabled(
+                          // A switch would be a lie here: a switched-off card
+                          // leaves the board, so "off" and "not on the bar"
+                          // would look like two different states of one control.
+                          // The control is removal, and re-adding goes through
+                          // the zone's add button.
+                          _RemoveButton(
+                            onPressed: () => widget.state.setEnabled(
                               descriptor.id,
-                              enabled: value,
+                              enabled: false,
                             ),
                           ),
                         ],
@@ -687,7 +703,12 @@ class _AddCandidateRow extends StatelessWidget {
   }
 }
 
-/// The chevron that opens a module's own settings.
+/// A bare chevron that opens a module's own settings.
+///
+/// No background plate: the card already has one, and a second dark rectangle
+/// inside it — next to the label — was the thing that looked wrong. The chevron
+/// stays accent-tinted when the module has settings to open, so the card still
+/// says where to look.
 class _ExpanderButton extends StatelessWidget {
   const _ExpanderButton({
     required this.expanded,
@@ -705,48 +726,82 @@ class _ExpanderButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShellTheme.of(context);
-    // Accent when open, and when there is something to open: a module with
-    // settings marks its own expander so the place to look is visible without
-    // opening every card.
     final color = expanded || highlighted
         ? theme.accent
         : theme.colors.textTertiary;
+    final button = MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onPressed,
+        child: Padding(
+          padding: const EdgeInsets.all(6),
+          child: Icon(
+            expanded ? Icons.expand_less : Icons.expand_more,
+            size: 20,
+            color: color,
+          ),
+        ),
+      ),
+    );
     return Semantics(
       button: true,
       expanded: expanded,
+      label: expanded ? '收起设置' : '展开设置',
       child: ExcludeSemantics(
-        child: MouseRegion(
-          cursor: SystemMouseCursors.click,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: onPressed,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: theme.colors.tileOff.withValues(alpha: 0.7),
-                borderRadius: BorderRadius.circular(theme.chipRadius),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 5,
+        child: Tooltip(message: expanded ? '收起设置' : '展开设置', child: button),
+      ),
+    );
+  }
+}
+
+/// The cross that takes a module off the bar.
+class _RemoveButton extends StatefulWidget {
+  const _RemoveButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  State<_RemoveButton> createState() => _RemoveButtonState();
+}
+
+class _RemoveButtonState extends State<_RemoveButton> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShellTheme.of(context);
+    return Semantics(
+      button: true,
+      label: '从顶栏移除',
+      child: ExcludeSemantics(
+        child: Tooltip(
+          message: '从顶栏移除',
+          child: MouseRegion(
+            cursor: SystemMouseCursors.click,
+            onEnter: (_) => setState(() => _hovered = true),
+            onExit: (_) => setState(() => _hovered = false),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: widget.onPressed,
+              child: DecoratedBox(
+                // The plate only appears under the pointer: a row of idle red
+                // crosses would make the panel look like a warning.
+                decoration: BoxDecoration(
+                  color: _hovered
+                      ? theme.colors.performanceBad.withValues(alpha: 0.24)
+                      : Colors.transparent,
+                  borderRadius: theme.borderRadius(7),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      '设置',
-                      style: theme.text.systemBarCaption.copyWith(
-                        fontSize: 12,
-                        color: color,
-                      ),
-                    ),
-                    const SizedBox(width: 2),
-                    Icon(
-                      expanded ? Icons.expand_less : Icons.expand_more,
-                      size: 16,
-                      color: color,
-                    ),
-                  ],
+                child: Padding(
+                  padding: const EdgeInsets.all(5),
+                  child: Icon(
+                    Icons.close,
+                    size: 17,
+                    color: _hovered
+                        ? theme.colors.performanceBad
+                        : theme.colors.textTertiary,
+                  ),
                 ),
               ),
             ),
