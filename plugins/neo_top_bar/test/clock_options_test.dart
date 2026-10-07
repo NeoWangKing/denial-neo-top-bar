@@ -78,6 +78,93 @@ void main() {
     });
   });
 
+  group('month numerals', () {
+    const zh = <String>[
+      '一月',
+      '二月',
+      '三月',
+      '四月',
+      '五月',
+      '六月',
+      '七月',
+      '八月',
+      '九月',
+      '十月',
+      '十一月',
+      '十二月',
+    ];
+    const ja = <String>[
+      '1月',
+      '2月',
+      '3月',
+      '4月',
+      '5月',
+      '6月',
+      '7月',
+      '8月',
+      '9月',
+      '10月',
+      '11月',
+      '12月',
+    ];
+    const en = <String>[
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
+
+    test('finds the unit in languages that number their months', () {
+      expect(neoMonthUnitSuffix(zh), '月');
+      expect(neoMonthUnitSuffix(ja), '月');
+      expect(
+        neoMonthUnitSuffix(<String>[
+          '1월',
+          '2월',
+          '3월',
+          '4월',
+          '5월',
+          '6월',
+          '7월',
+          '8월',
+          '9월',
+          '10월',
+          '11월',
+          '12월',
+        ]),
+        '월',
+      );
+    });
+
+    test('finds no unit where months are named', () {
+      // January, February and March share nothing, which is the signal that a
+      // bare number would be meaningless.
+      expect(neoMonthUnitSuffix(en), '');
+    });
+
+    test(
+      'builds the numeric label where there is a unit, and refuses elsewhere',
+      () {
+        expect(neoNumericMonthLabel(month: 10, monthNames: zh), '10月');
+        expect(neoNumericMonthLabel(month: 1, monthNames: zh), '1月');
+        expect(neoNumericMonthLabel(month: 10, monthNames: en), isNull);
+      },
+    );
+
+    test('an incomplete or empty list is not a unit', () {
+      expect(neoMonthUnitSuffix(const <String>[]), '');
+      expect(neoMonthUnitSuffix(const <String>['一月', '二月']), '');
+    });
+  });
+
   group('neoDatePatternFrom', () {
     test('reads the Chinese template', () {
       final pattern = neoDatePatternFrom(
@@ -161,11 +248,23 @@ void main() {
       day: day,
     );
 
-    test('Chinese arrangements', () {
-      expect(format(NeoClockDateFormat.monthDayWeekday), '十月8日 星期四');
-      expect(format(NeoClockDateFormat.monthDay), '十月8日');
-      expect(format(NeoClockDateFormat.weekday), '星期四');
-      expect(format(NeoClockDateFormat.isoDate), '2026-10-08');
+    test('Chinese arrangements, with an Arabic month number', () {
+      // The month label is `10月` rather than `十月`, so nothing in the date
+      // mixes numeral systems.
+      const monthLabel = '10月';
+      expect(
+        format(NeoClockDateFormat.monthDayWeekday, monthName: monthLabel),
+        '10月8日 星期四',
+      );
+      expect(
+        format(NeoClockDateFormat.monthDay, monthName: monthLabel),
+        '10月8日',
+      );
+      expect(format(NeoClockDateFormat.weekday, monthName: monthLabel), '星期四');
+      expect(
+        format(NeoClockDateFormat.isoDate, monthName: monthLabel),
+        '2026-10-08',
+      );
     });
 
     test('English arrangements follow the English order', () {

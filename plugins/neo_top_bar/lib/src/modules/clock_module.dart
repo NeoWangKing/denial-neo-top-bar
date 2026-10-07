@@ -50,7 +50,9 @@ class _ClockContent extends ConsumerWidget {
         : neoFormatClockDate(
             format: options.dateFormat,
             pattern: _patternOf(context, strings, now),
-            monthName: localizedMonth(context.l10n, now.month),
+            // A number where the language numbers its months, its name otherwise:
+            // `十月8日` mixes a Chinese numeral with an Arabic one.
+            monthName: _monthLabel(context, now.month),
             weekdayName: localizedWeekday(context.l10n, now.weekday),
             year: now.year,
             month: now.month,
@@ -167,6 +169,22 @@ String _timeText(
     amLabel: labels.am,
     pmLabel: labels.pm,
   );
+}
+
+/// The month as the clock should write it.
+///
+/// Languages that number their months get `10月`; languages that name them get
+/// the name, because `10` alone would not read as a month. See
+/// [neoNumericMonthLabel] for how the unit is recovered.
+String _monthLabel(BuildContext context, int month) {
+  final l10n = context.l10n;
+  return neoNumericMonthLabel(
+        month: month,
+        monthNames: <String>[
+          for (var index = 1; index <= 12; index++) localizedMonth(l10n, index),
+        ],
+      ) ??
+      localizedMonth(l10n, month);
 }
 
 /// How this locale arranges a date, read from the host's own template.

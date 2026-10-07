@@ -48,11 +48,55 @@ String neoClockDateFormatLabel(NeoClockDateFormat format) => switch (format) {
 
 String neoClockDateFormatDescription(NeoClockDateFormat format) =>
     switch (format) {
-      NeoClockDateFormat.monthDayWeekday => '和 Denial 自带顶栏一样，例如「十月8日 星期四」',
-      NeoClockDateFormat.monthDay => '更短，例如「十月8日」',
+      NeoClockDateFormat.monthDayWeekday => '例如「10月8日 星期四」',
+      NeoClockDateFormat.monthDay => '更短，例如「10月8日」',
       NeoClockDateFormat.weekday => '最短，例如「星期四」',
       NeoClockDateFormat.isoDate => '带年份、任何语言下都不会歧义，例如「2026-10-08」',
     };
+
+/// The unit a language writes after a month *number*, or an empty string when it
+/// names its months instead.
+///
+/// This is what keeps the clock's date from mixing numeral systems. Denial
+/// localizes month *names*, and languages that build those names out of a number
+/// and a unit — 十月, 10月, 10월 — produce dates like `十月8日`, where a Chinese
+/// numeral sits beside an Arabic one. The unit is recovered by finding the suffix
+/// all twelve names share: every Chinese month ends in 月, so that is the unit,
+/// while January, February and March share nothing, which is the signal that the
+/// language names its months and that a bare `10` would read as nonsense.
+String neoMonthUnitSuffix(List<String> monthNames) {
+  if (monthNames.length < 12) return '';
+  var suffix = monthNames.first;
+  for (final name in monthNames.skip(1)) {
+    suffix = _commonSuffix(suffix, name);
+    if (suffix.isEmpty) return '';
+  }
+  // A shared suffix made of letters or digits is a spelling coincidence rather
+  // than a unit, and using it would turn a month name into nonsense.
+  if (RegExp(r'[A-Za-z0-9]').hasMatch(suffix)) return '';
+  return suffix.trim();
+}
+
+String _commonSuffix(String left, String right) {
+  var length = 0;
+  while (length < left.length &&
+      length < right.length &&
+      left[left.length - 1 - length] == right[right.length - 1 - length]) {
+    length++;
+  }
+  return left.substring(left.length - length);
+}
+
+/// The month written with Arabic numerals for [month], or null when this language
+/// names its months and a number would read as nonsense.
+String? neoNumericMonthLabel({
+  required int month,
+  required List<String> monthNames,
+}) {
+  final unit = neoMonthUnitSuffix(monthNames);
+  if (unit.isEmpty) return null;
+  return '$month$unit';
+}
 
 /// The option key holding whether the date is shown.
 const String neoClockShowDateKey = 'showDate';
