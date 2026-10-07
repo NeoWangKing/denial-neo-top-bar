@@ -73,6 +73,18 @@ void main() {
     });
   });
 
+  group('neoCardKeyName', () {
+    test('two copies of one module are two different cards', () {
+      // Keying by module id gave both copies the same key, and a reorderable
+      // list treats a duplicate key as the same child: the board drew one card
+      // and dragged the wrong one.
+      expect(
+        neoCardKeyName('workspaces'),
+        isNot(neoCardKeyName('workspaces#2')),
+      );
+    });
+  });
+
   group('neoAddCandidates', () {
     test('offers every module, including ones already on the bar', () {
       // The list used to skip whatever was already on the zone, which is what

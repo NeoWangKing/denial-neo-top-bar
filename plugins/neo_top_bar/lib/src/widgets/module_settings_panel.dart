@@ -301,7 +301,7 @@ class _ZoneSection extends StatelessWidget {
             children: [
               for (final row in rows)
                 _ModuleCard(
-                  key: ValueKey<String>('settings-${row.descriptor.id}'),
+                  key: ValueKey<String>(neoCardKeyName(row.id)),
                   placement: row,
                   state: state,
                   services: services,
@@ -546,9 +546,14 @@ class _ExpandedSettings extends StatelessWidget {
                 NeoModuleSettingsScope(
                   services: services,
                   monitorId: monitorId,
-                  options: state.config.optionsOf(placement.descriptor.id),
+                  // Read from the placement, which already carries *this*
+                  // instance's options: two copies of one module have their own,
+                  // and reaching back into the config by module id would have
+                  // both cards editing the first copy. The write still needs the
+                  // instance id, which is why it is spelled out here.
+                  options: placement.options,
                   setOption: (key, value) =>
-                      state.setOption(placement.descriptor.id, key, value),
+                      state.setOption(placement.id, key, value),
                 ),
               )
             else

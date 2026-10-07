@@ -30,6 +30,15 @@ List<NeoModuleDescriptor> neoAddCandidates(
   Iterable<NeoModuleDescriptor> descriptors,
 ) => List<NeoModuleDescriptor>.unmodifiable(descriptors);
 
+/// The key a board card is built with.
+///
+/// Instance identity, not module identity. Keying cards by their *module* made
+/// two copies of one module a single card — reorderable lists match children by
+/// key, and a duplicate key is matched as the same child — so adding a second
+/// workspaces pill produced one card, and dragging it behaved as if the list had
+/// fewer rows than it drew.
+String neoCardKeyName(String instanceId) => 'settings-card-$instanceId';
+
 /// The `beforeId` for a drop that landed at [newIndex], given the zone's ids in
 /// the order the list was built with.
 ///
