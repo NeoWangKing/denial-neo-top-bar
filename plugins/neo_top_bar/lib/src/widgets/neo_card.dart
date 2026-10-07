@@ -11,6 +11,23 @@ import 'package:denial_flutter_sdk/effects.dart';
 import 'package:denial_flutter_sdk/theme.dart';
 import 'package:flutter/material.dart';
 
+/// The padding a pill keeps inside its card.
+///
+/// A horizontal pill only needs side padding: the strip already fixes its height,
+/// and the pills beside it set the spacing along the bar. A vertical pill is the
+/// other way round — the strip fixes its *width* — and that width is small: a
+/// 55px bar leaves a 45px pill, so the 12px sides a horizontal pill uses would
+/// leave about 20px of content, narrower than a single glyph. The vertical case
+/// therefore spends its padding on the ends of the bar and keeps the sides thin.
+///
+/// Shared by both card widgets so they can never disagree about it.
+EdgeInsets neoCardPadding({
+  required bool horizontal,
+  required double density,
+}) => horizontal
+    ? EdgeInsets.symmetric(horizontal: 12 * density)
+    : EdgeInsets.symmetric(horizontal: 6 * density, vertical: 7 * density);
+
 class NeoCard extends StatelessWidget {
   const NeoCard({
     required this.child,
@@ -32,11 +49,7 @@ class NeoCard extends StatelessWidget {
     final theme = ShellTheme.of(context);
     final radius = theme.borderRadius(999);
     final resolvedPadding =
-        padding ??
-        EdgeInsets.symmetric(
-          horizontal: 12 * density,
-          vertical: horizontal ? 0 : 12 * density,
-        );
+        padding ?? neoCardPadding(horizontal: horizontal, density: density);
     return ShellBackdropBlur(
       blur: theme.effectiveCardOpacity < 1.0,
       borderRadius: radius,
@@ -109,10 +122,7 @@ class _NeoCardButtonState extends State<NeoCardButton> {
         : widget.accent.cardFill(theme);
     final resolvedPadding =
         widget.padding ??
-        EdgeInsets.symmetric(
-          horizontal: 12 * widget.density,
-          vertical: widget.horizontal ? 0 : 12 * widget.density,
-        );
+        neoCardPadding(horizontal: widget.horizontal, density: widget.density);
 
     // Animated rather than swapped: the highlight used to land in one frame,
     // which is what made hovering feel abrupt. Only the decoration animates, so

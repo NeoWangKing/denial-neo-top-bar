@@ -100,8 +100,21 @@ void main() {
 
     test('every icon has a label and a description', () {
       for (final icon in NeoLauncherIcon.values) {
-        expect(neoLauncherIconLabel(icon), isNotEmpty);
-        expect(neoLauncherIconDescription(icon), isNotEmpty);
+        expect(
+          const NeoStrings(NeoLanguage.zh).launcherIconLabel(icon),
+          isNotEmpty,
+        );
+        expect(
+          const NeoStrings(NeoLanguage.zh).launcherIconDescription(icon),
+          isNotEmpty,
+        );
+        // "Denial" is a name, so it is spelled the same in both languages.
+        if (icon != NeoLauncherIcon.denial) {
+          expect(
+            const NeoStrings(NeoLanguage.en).launcherIconLabel(icon),
+            isNot(const NeoStrings(NeoLanguage.zh).launcherIconLabel(icon)),
+          );
+        }
       }
       expect(neoLauncherIconOrder.toSet(), NeoLauncherIcon.values.toSet());
     });

@@ -75,7 +75,8 @@ class _WorkspaceContent extends ConsumerWidget {
       density: module.density,
       horizontal: horizontal,
       padding: EdgeInsets.symmetric(
-        horizontal: 12 * module.density,
+        // A vertical pill is only as wide as the strip; see `neoCardPadding`.
+        horizontal: (horizontal ? 12 : 6) * module.density,
         vertical: horizontal ? 0 : 12 * module.density,
       ),
       child: Flex(

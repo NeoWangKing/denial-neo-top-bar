@@ -39,21 +39,6 @@ const List<NeoClockDateFormat> neoClockDateFormatOrder = <NeoClockDateFormat>[
   NeoClockDateFormat.isoDate,
 ];
 
-String neoClockDateFormatLabel(NeoClockDateFormat format) => switch (format) {
-  NeoClockDateFormat.monthDayWeekday => '月日 + 星期',
-  NeoClockDateFormat.monthDay => '只要月日',
-  NeoClockDateFormat.weekday => '只要星期',
-  NeoClockDateFormat.isoDate => '数字日期',
-};
-
-String neoClockDateFormatDescription(NeoClockDateFormat format) =>
-    switch (format) {
-      NeoClockDateFormat.monthDayWeekday => '例如「10月8日 星期四」',
-      NeoClockDateFormat.monthDay => '更短，例如「10月8日」',
-      NeoClockDateFormat.weekday => '最短，例如「星期四」',
-      NeoClockDateFormat.isoDate => '带年份、任何语言下都不会歧义，例如「2026-10-08」',
-    };
-
 /// The unit a language writes after a month *number*, or an empty string when it
 /// names its months instead.
 ///
@@ -189,8 +174,10 @@ class NeoDatePattern {
 
 /// What this file assumes when the template cannot be read.
 ///
-/// Only reachable with a host that returns something unexpected; it matches the
-/// Chinese template, which is what this plugin's own strings are written in.
+/// Only reachable with a host that returns something unexpected, so it is written
+/// in the plugin's own fallback language: Chinese, where the day carries a 日
+/// suffix and the weekday trails the date. [neoFallbackDatePatternFor] has the
+/// English arrangement for the other language.
 const NeoDatePattern neoFallbackDatePattern = NeoDatePattern(
   order: <NeoDatePart>[NeoDatePart.month, NeoDatePart.day, NeoDatePart.weekday],
   separator: ' ',
@@ -198,22 +185,44 @@ const NeoDatePattern neoFallbackDatePattern = NeoDatePattern(
   monthDaySeparator: '',
 );
 
+/// The unreadable-template assumption for [languageCode].
+///
+/// English leads with the weekday and separates day from month with a space, so a
+/// fallback built for Chinese would write `10月8日` to an English reader.
+NeoDatePattern neoFallbackDatePatternFor(String languageCode) {
+  if (languageCode.toLowerCase().startsWith('zh')) {
+    return neoFallbackDatePattern;
+  }
+  return const NeoDatePattern(
+    order: <NeoDatePart>[
+      NeoDatePart.weekday,
+      NeoDatePart.day,
+      NeoDatePart.month,
+    ],
+    separator: ' ',
+    daySuffix: '',
+    monthDaySeparator: ' ',
+  );
+}
+
 /// Reads the arrangement out of a localized date and the names it was built from.
 ///
 /// [shortDate] is the host's own `shortDate` output for the same [day];
 /// [monthName] and [weekdayName] are the localized names for that date. Removing
 /// them leaves the separators and the day's suffix, which is exactly what the
-/// clock needs to rebuild any subset of the date.
+/// clock needs to rebuild any subset of the date. [fallback] is returned when the
+/// template cannot be read at all.
 NeoDatePattern neoDatePatternFrom({
   required String shortDate,
   required String monthName,
   required String weekdayName,
   required int day,
+  NeoDatePattern fallback = neoFallbackDatePattern,
 }) {
   final text = shortDate;
   final monthAt = monthName.isEmpty ? -1 : text.indexOf(monthName);
   final weekdayAt = weekdayName.isEmpty ? -1 : text.indexOf(weekdayName);
-  if (monthAt < 0 || weekdayAt < 0) return neoFallbackDatePattern;
+  if (monthAt < 0 || weekdayAt < 0) return fallback;
   final monthFirst = monthAt < weekdayAt;
 
   // The date without the weekday: what is left between the two names, and the
@@ -227,7 +236,7 @@ NeoDatePattern neoDatePatternFrom({
       : rawDate.substring(0, rawDate.length - datePart.length);
 
   final dayAt = datePart.indexOf('$day');
-  if (dayAt < 0) return neoFallbackDatePattern;
+  if (dayAt < 0) return fallback;
 
   String monthDaySeparator;
   String daySuffix;
@@ -312,14 +321,13 @@ String _monthDay(NeoDatePattern pattern, String monthName, int day) =>
 /// The AM/PM wording for [languageCode].
 ///
 /// Denial's localization has no meridiem strings, so this is the one piece of
-/// wording the plugin supplies itself. Languages that write a 12-hour clock in
-/// their own words get them; everything else gets the Latin markers, which are
-/// understood nearly everywhere.
+/// wording the plugin supplies itself. It lives here rather than in the string
+/// catalogue because it is chosen from a language code alone, with no
+/// `BuildContext` in reach. Denial only ships Chinese and English, so everything
+/// that is not Chinese gets the Latin markers.
 ({String am, String pm}) neoMeridiemLabels(String languageCode) {
   final code = languageCode.toLowerCase();
   if (code.startsWith('zh')) return (am: '上午', pm: '下午');
-  if (code.startsWith('ja')) return (am: '午前', pm: '午後');
-  if (code.startsWith('ko')) return (am: '오전', pm: '오후');
   return (am: 'AM', pm: 'PM');
 }
 

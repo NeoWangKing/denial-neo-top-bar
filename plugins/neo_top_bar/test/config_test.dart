@@ -4,29 +4,21 @@ import 'package:test/test.dart';
 const _descriptors = <NeoModuleDescriptor>[
   NeoModuleDescriptor(
     id: 'tray',
-    label: 'Tray',
-    description: '',
     zone: NeoZone.start,
     priority: 10,
   ),
   NeoModuleDescriptor(
     id: 'workspaces',
-    label: 'Workspaces',
-    description: '',
     zone: NeoZone.center,
     priority: 10,
   ),
   NeoModuleDescriptor(
     id: 'clock',
-    label: 'Clock',
-    description: '',
     zone: NeoZone.end,
     priority: 10,
   ),
   NeoModuleDescriptor(
     id: 'cpu',
-    label: 'CPU',
-    description: '',
     zone: NeoZone.end,
     priority: 50,
     defaultEnabled: false,
@@ -184,8 +176,6 @@ void main() {
         ..._descriptors,
         const NeoModuleDescriptor(
           id: 'aaa',
-          label: 'A',
-          description: '',
           zone: NeoZone.start,
           priority: 10,
         ),
@@ -420,7 +410,13 @@ void main() {
       // Both copies carry the same title: the number is identity, not a label,
       // and where a card sits is what tells the two apart.
       expect(
-        clocks.map((placement) => placement.descriptor.label).toSet(),
+        clocks
+            .map(
+              (placement) =>
+                  const NeoStrings(NeoLanguage.zh)
+                      .moduleLabel(placement.moduleId),
+            )
+            .toSet(),
         <String>{'时钟与日期'},
       );
     });

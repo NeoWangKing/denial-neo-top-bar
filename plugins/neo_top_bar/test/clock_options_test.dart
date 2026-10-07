@@ -68,8 +68,18 @@ void main() {
 
     test('every format has a label and a description', () {
       for (final format in NeoClockDateFormat.values) {
-        expect(neoClockDateFormatLabel(format), isNotEmpty);
-        expect(neoClockDateFormatDescription(format), isNotEmpty);
+        expect(
+          const NeoStrings(NeoLanguage.zh).clockDateFormatLabel(format),
+          isNotEmpty,
+        );
+        expect(
+          const NeoStrings(NeoLanguage.zh).clockDateFormatDescription(format),
+          isNotEmpty,
+        );
+        expect(
+          const NeoStrings(NeoLanguage.en).clockDateFormatLabel(format),
+          isNot(const NeoStrings(NeoLanguage.zh).clockDateFormatLabel(format)),
+        );
       }
       expect(
         neoClockDateFormatOrder.toSet(),
@@ -315,7 +325,8 @@ void main() {
     test('meridiem wording follows the language', () {
       expect(neoMeridiemLabels('zh').am, '上午');
       expect(neoMeridiemLabels('zh_CN').pm, '下午');
-      expect(neoMeridiemLabels('ja').am, '午前');
+      // Denial ships only these two, so any third tag reads as English.
+      expect(neoMeridiemLabels('ja').am, 'AM');
       expect(neoMeridiemLabels('en').am, 'AM');
       expect(neoMeridiemLabels('de').pm, 'PM');
     });

@@ -8,31 +8,11 @@ import 'package:neo_top_bar/neo_top_bar_logic.dart';
 import 'package:test/test.dart';
 
 const _descriptors = <NeoModuleDescriptor>[
-  NeoModuleDescriptor(
-    id: 'a',
-    label: 'A',
-    description: '',
-    zone: NeoZone.start,
-    priority: 10,
-  ),
-  NeoModuleDescriptor(
-    id: 'b',
-    label: 'B',
-    description: '',
-    zone: NeoZone.start,
-    priority: 20,
-  ),
-  NeoModuleDescriptor(
-    id: 'c',
-    label: 'C',
-    description: '',
-    zone: NeoZone.end,
-    priority: 10,
-  ),
+  NeoModuleDescriptor(id: 'a', zone: NeoZone.start, priority: 10),
+  NeoModuleDescriptor(id: 'b', zone: NeoZone.start, priority: 20),
+  NeoModuleDescriptor(id: 'c', zone: NeoZone.end, priority: 10),
   NeoModuleDescriptor(
     id: 'd',
-    label: 'D',
-    description: '',
     zone: NeoZone.end,
     priority: 20,
     defaultEnabled: false,

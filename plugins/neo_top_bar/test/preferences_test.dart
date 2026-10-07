@@ -145,8 +145,6 @@ void main() {
 
 const _cpuDescriptor = NeoModuleDescriptor(
   id: 'cpu',
-  label: 'CPU',
-  description: '',
   zone: NeoZone.end,
   defaultEnabled: false,
 );

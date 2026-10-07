@@ -43,7 +43,8 @@ class _TrayContent extends ConsumerWidget {
       density: module.density,
       horizontal: module.horizontal,
       padding: EdgeInsets.symmetric(
-        horizontal: 10 * module.density,
+        // A vertical pill is only as wide as the strip; see `neoCardPadding`.
+        horizontal: (module.horizontal ? 10 : 6) * module.density,
         vertical: module.horizontal ? 0 : 10 * module.density,
       ),
       child: services.buildSystemTray(context, horizontal: module.horizontal),

@@ -16,6 +16,7 @@ import 'package:denial_flutter_sdk/actions.dart';
 import 'package:denial_flutter_sdk/surfaces.dart';
 import 'package:flutter/widgets.dart';
 
+import 'src/core/l10n_context.dart';
 import 'src/core/settings_requests.dart';
 import 'src/widgets/neo_bar.dart';
 
@@ -52,10 +53,11 @@ final class OpenNeoTopBarSettingsAction implements ShellAction {
   String get provider => 'Neo Top Bar';
 
   @override
-  String label(BuildContext context) => '顶栏组件设置';
+  String label(BuildContext context) => context.neoStrings.settingsTitle;
 
   @override
-  String description(BuildContext context) => '打开 Neo Top Bar 的组件开关、分区与排序面板';
+  String description(BuildContext context) =>
+      context.neoStrings.settingsTooltip;
 
   @override
   void invoke(ShellActionContext context) {

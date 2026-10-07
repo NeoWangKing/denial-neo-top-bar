@@ -8,6 +8,7 @@ import 'package:denial_flutter_sdk/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/l10n_context.dart';
 import '../core/module.dart';
 import '../core/module_defaults.dart';
 import '../core/module_descriptor.dart';
@@ -34,6 +35,7 @@ class _MediaContent extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final s = context.neoStrings;
     final services = module.services;
     final playback = ref.watch(services.media);
     final current = playback.value;
@@ -72,35 +74,45 @@ class _MediaContent extends ConsumerWidget {
           ),
         );
 
+    final transport = <Widget>[
+      if (current.canGoPrevious)
+        iconButton(Icons.skip_previous, s.previousTrack, commands.previous),
+      if (current.playing ? current.canPause : current.canPlay)
+        iconButton(
+          current.playing ? Icons.pause : Icons.play_arrow,
+          current.playing ? s.pause : s.play,
+          commands.playPause,
+        ),
+      if (current.canGoNext)
+        iconButton(Icons.skip_next, s.nextTrack, commands.next),
+    ];
+
     return NeoCard(
       accent: module.accent,
       density: module.density,
       horizontal: module.horizontal,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 150),
-            child: Text(
-              label,
-              style: ShellText.systemBarValue,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          const SizedBox(width: 8),
-          if (current.canGoPrevious)
-            iconButton(Icons.skip_previous, '上一首', commands.previous),
-          if (current.playing ? current.canPause : current.canPlay)
-            iconButton(
-              current.playing ? Icons.pause : Icons.play_arrow,
-              current.playing ? '暂停' : '播放',
-              commands.playPause,
-            ),
-          if (current.canGoNext)
-            iconButton(Icons.skip_next, '下一首', commands.next),
-        ],
-      ),
+      child: module.horizontal
+          ? Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 150),
+                  child: Text(
+                    label,
+                    style: ShellText.systemBarValue,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                ...transport,
+              ],
+            )
+          // Vertical: the buttons only. A track title cannot be read in a pill as
+          // wide as the strip — it would be an ellipsis with three letters — so
+          // the transport is what a vertical bar keeps, and the title stays in
+          // the media panel.
+          : Column(mainAxisSize: MainAxisSize.min, children: transport),
     );
   }
 }

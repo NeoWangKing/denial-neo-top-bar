@@ -114,52 +114,73 @@ class NeoLoadMeter extends StatelessWidget {
     final caption = ShellText.systemBarCaption.copyWith(
       color: module.accent.captionColor(theme),
     );
+    final percentage = Text.rich(
+      TextSpan(
+        text: strings.numberValue(((series.current ?? 0.0) * 100).round()),
+        style: ShellText.systemBarValue,
+        children: [TextSpan(text: strings.percentSign, style: caption)],
+      ),
+      textAlign: TextAlign.right,
+      maxLines: 1,
+    );
+    final temperatureC = series.temperatureC;
+    final temperature = temperatureC == null
+        ? null
+        : Text.rich(
+            TextSpan(
+              text: strings.numberValue(temperatureC.round()),
+              style: ShellText.systemBarValue,
+              children: [TextSpan(text: strings.celsiusUnit, style: caption)],
+            ),
+            maxLines: 1,
+          );
+    final sparkline = RepaintBoundary(
+      child: CustomPaint(
+        // A vertical pill is only as wide as the strip, so the line is drawn
+        // narrower there rather than being clipped by the card.
+        size: Size(module.horizontal ? 38 : 28, 14),
+        painter: _SparklinePainter(
+          history: series.history,
+          accent: theme.accent,
+        ),
+      ),
+    );
+
     return NeoCard(
       accent: module.accent,
       density: module.density,
       horizontal: module.horizontal,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(label, style: caption),
-          const SizedBox(width: 6),
-          RepaintBoundary(
-            child: CustomPaint(
-              size: const Size(38, 14),
-              painter: _SparklinePainter(
-                history: series.history,
-                accent: theme.accent,
-              ),
+      child: module.horizontal
+          ? Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(label, style: caption),
+                const SizedBox(width: 6),
+                sparkline,
+                const SizedBox(width: 7),
+                SizedBox(width: 34, child: percentage),
+                if (temperature != null) ...[
+                  const SizedBox(width: 7),
+                  temperature,
+                ],
+              ],
+            )
+          // Vertical: the name tag is dropped. The pill is only as wide as the
+          // strip, and of the four things this meter carries the tag is the one
+          // that says least — the number and the line are the reading. What is
+          // left stacks top to bottom: percentage, temperature, history.
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FittedBox(fit: BoxFit.scaleDown, child: percentage),
+                if (temperature != null) ...[
+                  const SizedBox(height: 1),
+                  FittedBox(fit: BoxFit.scaleDown, child: temperature),
+                ],
+                const SizedBox(height: 3),
+                sparkline,
+              ],
             ),
-          ),
-          const SizedBox(width: 7),
-          SizedBox(
-            width: 34,
-            child: Text.rich(
-              TextSpan(
-                text: strings.numberValue(
-                  ((series.current ?? 0.0) * 100).round(),
-                ),
-                style: ShellText.systemBarValue,
-                children: [TextSpan(text: strings.percentSign, style: caption)],
-              ),
-              textAlign: TextAlign.right,
-              maxLines: 1,
-            ),
-          ),
-          if (series.temperatureC case final temperature?) ...[
-            const SizedBox(width: 7),
-            Text.rich(
-              TextSpan(
-                text: strings.numberValue(temperature.round()),
-                style: ShellText.systemBarValue,
-                children: [TextSpan(text: strings.celsiusUnit, style: caption)],
-              ),
-              maxLines: 1,
-            ),
-          ],
-        ],
-      ),
     );
   }
 }

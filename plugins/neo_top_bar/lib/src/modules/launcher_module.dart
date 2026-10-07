@@ -27,6 +27,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 import '../core/launcher_options.dart';
+import '../core/l10n_context.dart';
 import '../core/module.dart';
 import '../core/module_defaults.dart';
 import '../core/module_descriptor.dart';
@@ -60,6 +61,14 @@ const String kLauncherLogoAsset = 'assets/archlinux-logo.svg';
 /// That is the price of not moving icons around; the alternative — rotating the
 /// visible set — would shuffle the row on every open and close.
 const int kMaxWindowIcons = 10;
+
+/// How many window tiles a **vertical** pill stacks.
+///
+/// The bar is a column there, so every extra tile makes one pill taller instead
+/// of wider. Ten would be taller than most screens; five keeps the mark and its
+/// workspace readable at a glance, and what did not fit is still counted in `+N`
+/// (the mark itself opens the full list).
+const int kMaxWindowIconsVertical = 5;
 
 /// Icon size as a fraction of the strip's cross extent, clamped to sane pixels.
 const double _logoFraction = 0.62;
@@ -117,11 +126,11 @@ class _LauncherContentState extends ConsumerState<_LauncherContent> {
 
   @override
   Widget build(BuildContext context) {
+    final s = context.neoStrings;
     final module = widget.module;
     final services = module.services;
     final windows = ref.watch(services.windows(module.monitorId));
     final theme = ShellTheme.of(context);
-    final gap = 5 * module.density;
     final logo = ref.watch(neoSystemLogoProvider);
     final options = neoLauncherOptions(
       module.options,
@@ -146,9 +155,11 @@ class _LauncherContentState extends ConsumerState<_LauncherContent> {
     // off is about the *bar*, not about the data: the provider stays subscribed
     // either way so switching it back on is immediate.
     final listed = options.showWindows ? ordered : const <ApplicationWindow>[];
-    final shown = listed.length > kMaxWindowIcons
-        ? listed.sublist(0, kMaxWindowIcons)
-        : listed;
+    // A vertical pill has room for a handful of stacked icons, not ten: the bar
+    // is a column there, and ten 20px tiles would make one pill taller than the
+    // screen. The rest are still reachable by clicking the mark itself.
+    final limit = module.horizontal ? kMaxWindowIcons : kMaxWindowIconsVertical;
+    final shown = listed.length > limit ? listed.sublist(0, limit) : listed;
     final hidden = listed.length - shown.length;
 
     return NeoCardButton(
@@ -156,13 +167,14 @@ class _LauncherContentState extends ConsumerState<_LauncherContent> {
       density: module.density,
       horizontal: module.horizontal,
       tooltip: !options.showWindows
-          ? '打开应用启动器'
+          ? s.launcherOpen
           : (listed.isEmpty
-                ? '打开应用启动器'
-                : '打开应用启动器 · 当前工作区 ${listed.length} 个窗口'),
+                ? s.launcherOpen
+                : s.launcherOpenWithCount(listed.length)),
       onPressed: services.toggleLauncher,
       padding: EdgeInsets.symmetric(
-        horizontal: 10 * module.density,
+        // A vertical pill is only as wide as the strip; see `neoCardPadding`.
+        horizontal: (module.horizontal ? 10 : 6) * module.density,
         vertical: module.horizontal ? 0 : 10 * module.density,
       ),
       child: LayoutBuilder(
@@ -181,8 +193,15 @@ class _LauncherContentState extends ConsumerState<_LauncherContent> {
             min: _minIcon,
             max: _maxIcon,
           );
+          final gap = 5 * module.density;
+          final separation = 8 * module.density;
 
-          return Row(
+          return Flex(
+            // A vertical bar stacks the mark and the window tiles instead of
+            // laying them out along a row: the pill is only as wide as the strip,
+            // so a row of tiles would run off the bar. The separator turns with
+            // them, which is what `_Separator.horizontal` is for.
+            direction: module.horizontal ? Axis.horizontal : Axis.vertical,
             mainAxisSize: MainAxisSize.min,
             children: [
               Center(
@@ -197,15 +216,25 @@ class _LauncherContentState extends ConsumerState<_LauncherContent> {
                 ),
               ),
               if (shown.isNotEmpty) ...[
-                SizedBox(width: 8 * module.density),
+                SizedBox(
+                  width: module.horizontal ? separation : 0,
+                  height: module.horizontal ? 0 : separation,
+                ),
                 _Separator(
                   horizontal: module.horizontal,
                   extent: windowSize,
                   color: theme.colors.hairline,
                 ),
-                SizedBox(width: 8 * module.density),
+                SizedBox(
+                  width: module.horizontal ? separation : 0,
+                  height: module.horizontal ? 0 : separation,
+                ),
                 for (var index = 0; index < shown.length; index++) ...[
-                  if (index > 0) SizedBox(width: gap),
+                  if (index > 0)
+                    SizedBox(
+                      width: module.horizontal ? gap : 0,
+                      height: module.horizontal ? 0 : gap,
+                    ),
                   _WindowIcon(
                     window: shown[index],
                     services: services,
@@ -213,7 +242,10 @@ class _LauncherContentState extends ConsumerState<_LauncherContent> {
                   ),
                 ],
                 if (hidden > 0) ...[
-                  SizedBox(width: gap),
+                  SizedBox(
+                    width: module.horizontal ? gap : 0,
+                    height: module.horizontal ? 0 : gap,
+                  ),
                   Text(
                     '+$hidden',
                     style: ShellText.systemBarCaption.copyWith(
@@ -400,6 +432,7 @@ class _LauncherSettingsState extends ConsumerState<_LauncherSettings> {
 
   @override
   Widget build(BuildContext context) {
+    final s = context.neoStrings;
     final scope = widget.scope;
     final logo = ref.watch(neoSystemLogoProvider);
     final options = neoLauncherOptions(
@@ -411,15 +444,15 @@ class _LauncherSettingsState extends ConsumerState<_LauncherSettings> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         NeoSettingGroup(
-          title: '图标',
+          title: s.launcherIcon,
           children: [
             NeoSettingRow(
-              label: '用哪种图标',
-              description: neoLauncherIconDescription(options.effectiveIcon),
+              label: s.launcherIconQuestion,
+              description: s.launcherIconDescription(options.effectiveIcon),
               child: NeoSettingChips<NeoLauncherIcon>(
                 values: <NeoLauncherIcon, String>{
                   for (final icon in neoLauncherIconOrder)
-                    icon: neoLauncherIconLabel(icon),
+                    icon: s.launcherIconLabel(icon),
                 },
                 selected: options.icon,
                 enabled: neoLauncherIconSelectable,
@@ -439,8 +472,8 @@ class _LauncherSettingsState extends ConsumerState<_LauncherSettings> {
             if (options.icon == NeoLauncherIcon.system)
               _SettingsNote(
                 text: switch (logo.path) {
-                  final path? => '用的是 $path',
-                  _ => '这台机器上没有发行版的图标文件，栏上会用插件自带的那张。',
+                  final path? => s.launcherUsingPath(path),
+                  _ => s.launcherNoDistroLogo,
                 },
               ),
             if (options.icon == NeoLauncherIcon.custom) ...[
@@ -464,19 +497,16 @@ class _LauncherSettingsState extends ConsumerState<_LauncherSettings> {
               ],
             ],
             if (options.fellBack)
-              const _SettingsNote(
-                text: '当前这个选择还用不了，栏上显示的是默认图标。',
-                warning: true,
-              ),
+              _SettingsNote(text: s.launcherFallbackActive, warning: true),
           ],
         ),
         const SizedBox(height: 14),
         NeoSettingGroup(
-          title: '窗口',
+          title: s.launcherWindowsSection,
           children: [
             NeoSettingRow(
-              label: '显示当前工作区的应用',
-              description: '在图标右边列出本工作区每个窗口的图标，点一下聚焦',
+              label: s.launcherShowWorkspaceWindows,
+              description: s.launcherShowWorkspaceWindowsHint,
               child: NeoSettingToggle(
                 value: options.showWindows,
                 onChanged: (value) =>
@@ -485,7 +515,7 @@ class _LauncherSettingsState extends ConsumerState<_LauncherSettings> {
             ),
           ],
         ),
-        _SettingsNote(text: 'Denial 官方图标还没有发布，所以这一项暂时不能选。'),
+        _SettingsNote(text: s.launcherDenialUnavailable),
       ],
     );
   }

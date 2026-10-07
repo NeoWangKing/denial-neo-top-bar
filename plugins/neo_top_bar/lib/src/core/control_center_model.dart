@@ -154,11 +154,6 @@ NeoThemeMode neoThemeMode({required bool isDark}) =>
 NeoThemeMode neoNextThemeMode(NeoThemeMode current) =>
     current == NeoThemeMode.dark ? NeoThemeMode.light : NeoThemeMode.dark;
 
-String neoThemeModeLabel(NeoThemeMode mode) => switch (mode) {
-  NeoThemeMode.light => '浅色',
-  NeoThemeMode.dark => '深色',
-};
-
 /// The writes a theme tap has to make, given what is on screen.
 ///
 /// Two settings can drive the shell's colours, and which one wins depends on the
@@ -388,32 +383,6 @@ bool neoPowerActionNeedsConfirmation(NeoPowerAction action) => switch (action) {
   NeoPowerAction.powerOff => true,
 };
 
-String neoPowerActionLabel(NeoPowerAction action) => switch (action) {
-  NeoPowerAction.lock => '锁屏',
-  NeoPowerAction.logout => '注销',
-  NeoPowerAction.suspend => '睡眠',
-  NeoPowerAction.hibernate => '休眠',
-  NeoPowerAction.reboot => '重启',
-  NeoPowerAction.powerOff => '关机',
-};
-
-/// Text of the confirmation strip shown for [action].
-String neoPowerConfirmationQuestion(NeoPowerAction action) => switch (action) {
-  NeoPowerAction.logout => '注销当前会话？未保存的工作会丢失。',
-  NeoPowerAction.reboot => '重启这台电脑？',
-  NeoPowerAction.powerOff => '关机？',
-  NeoPowerAction.lock ||
-  NeoPowerAction.suspend ||
-  NeoPowerAction.hibernate => '',
-};
-
-/// The slider caption: a percentage, or the muted state the slider cannot show.
-String neoVolumeLabel(double level, {bool muted = false}) {
-  final percent = (level.clamp(0.0, 1.0) * 100).round();
-  if (muted || percent == 0) return '静音';
-  return '$percent%';
-}
-
 String neoBrightnessLabel(double level) =>
     '${(level.clamp(0.0, 1.0) * 100).round()}%';
 
@@ -445,20 +414,6 @@ const List<NeoPillGlyph> neoPillGlyphOrder = <NeoPillGlyph>[
   NeoPillGlyph.bluetooth,
   NeoPillGlyph.battery,
 ];
-
-String neoPillGlyphLabel(NeoPillGlyph glyph) => switch (glyph) {
-  NeoPillGlyph.volume => '音量',
-  NeoPillGlyph.network => '网络',
-  NeoPillGlyph.bluetooth => '蓝牙',
-  NeoPillGlyph.battery => '电量',
-};
-
-String neoPillGlyphDescription(NeoPillGlyph glyph) => switch (glyph) {
-  NeoPillGlyph.volume => '扬声器图标，点开面板，右键静音',
-  NeoPillGlyph.network => 'Wi-Fi 或有线图标，右键开关无线',
-  NeoPillGlyph.bluetooth => '适配器开启时才出现，右键开关蓝牙',
-  NeoPillGlyph.battery => '电量百分比，没有电池的机器不显示',
-};
 
 /// The control centre's stored settings, resolved against their defaults.
 class NeoControlCenterOptions {

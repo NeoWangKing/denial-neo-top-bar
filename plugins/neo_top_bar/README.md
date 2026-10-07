@@ -535,6 +535,49 @@ _grab       0 → 1，360ms + Motion.md3Emphasized
 （= 丹尼奥设置里的「系统栏厚度」减去栏自己的边距）算出图标大小，并 clamp 在可读范围内。
 控制中心和启动器都用它，所以调厚度时一起变大变小，调间距时一个都不动。
 
+### 语言跟随 Denial 的语言设置
+
+插件自己的文案不写死在 widget 里，而是集中在 `lib/src/core/l10n.dart` 的 `NeoStrings`：
+
+- **一个短语一个 getter，中文在前、英文在后，写在同一个表达式里**——加短语时不可能只写一种语言。
+- 语言从哪读？Denial 的壳在整棵场景树外面套了 `DenialLocalizationScope`（内部是真的
+  `Localizations`），所以 `Localizations.maybeLocaleOf(context)?.languageCode` 就是用户选的语言。
+  `l10n_context.dart` 把它包成 `context.neoStrings`（widget 里用）和 `neoStringsFor(code)`（纯逻辑/测试用）。
+- **只支持中/英两种**，和 Denial 自己一致：`zh*` → 中文，其余一律英文（`neoLanguageFromCode`）。
+  连 AM/PM 也收窄成这两种（`neoMeridiemLabels` 不再返回日文/韩文）。
+- 组件名、组件描述、区名**不再挂在 `NeoModuleDescriptor` 上**（描述符只留布局事实：id、区、优先级），
+  改为 `s.moduleLabel(id)` / `s.moduleDescription(id)` / `s.zoneLabel(zone)`，按 id 去目录里取。
+  好处是描述符里不可能留一句「只有中文」的旧文案。
+- 日期回退模板也分语言：`neoFallbackDatePatternFor(languageCode)`——宿主模板读不出来时，
+  英文用户不该看到 `10月8日`。
+- **弹窗也在语言作用域内**：设置面板走 `shellPopupControllerProvider.show`，而 `ShellPopupHost`
+  挂在 `DenialLocalizationScope` **下面**（查过 `denial_shell.dart` 的挂载顺序），所以面板里
+  `context.neoStrings` 拿到的是同一个语言，不是回退值。
+- `test/l10n_test.dart` 守着两件事：英文里不许出现汉字；两种语言不能写出同一句话
+  （只有 `volumeLabel` 的「50%」这种例外，逐个列在 `neutral` 里）。
+
+### 竖栏（系统栏在左/右）下每个胶囊怎么排
+
+胶囊**竖着排**是 `neo_bar.dart` 本来就有的：栏的方向来自 `PanelEdge`，位置和尺寸都按主轴/交叉轴算。
+真正要每个组件自己处理的，是**胶囊内部**——竖栏的胶囊宽度就是栏的厚度（55px 的栏 → 45px 胶囊），
+横排的内容一定溢出，所以 `module.horizontal == false` 时改成竖排**并精简**：
+
+| 组件 | 横栏 | 竖栏 |
+|---|---|---|
+| 时钟 | 日期 + 时间一行 | **只留时间**（`20:52` 已接近 33px 可用宽度的极限），日期点开日历看 |
+| CPU / GPU | 名字 + 折线 + 百分比 + 温度一行 | 百分比 / 温度 / 折线自上而下，**去掉「CPU」「GPU0」名字**，折线画窄一点（28px） |
+| 媒体 | 标题 + 上一首/播放/下一首一行 | **只留三个按钮**（标题在这么窄的胶囊里只剩省略号） |
+| 电池 | 横向电量条 + 百分比 | 电量条**转 90°**（`RotatedBox`，矢量绘制不会糊）+ 百分比 |
+| 启动器 | 图标 + 窗口图标一行 | 图标 / 分隔线 / 窗口图标自上而下；竖栏最多叠 **5** 个（`kMaxWindowIconsVertical`），其余记在 `+N` |
+| 控制中心 | 状态图标一行 | 状态图标自上而下叠 |
+| 工作区 / 托盘 / 通知 | 本来就方向感知（`Axis.vertical`、`buildSystemTray(horizontal:)`、图标+角标居中） | 同左 |
+
+还有一条**共用的内边距规则** `neoCardPadding()`：横栏只用左右内边距（高度由栏定），
+竖栏反过来用上下内边距、左右收到 6px——否则 12px 的两侧会把 45px 的胶囊压到只剩 20px 可用宽度，
+连一个图标都放不下。启动器（10）、托盘（10）、工作区（12）保留各自的横栏值，只在竖栏收到 6。
+
+**这一部分是纯布局，没有 widget 测试**：只能把系统栏挪到左边或右边，用眼睛验收。
+
 ### 启动器的设置：图标来源与窗口列表
 
 | 选项 | 行为 |

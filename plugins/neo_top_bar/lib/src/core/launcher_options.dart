@@ -41,20 +41,6 @@ const List<NeoLauncherIcon> neoLauncherIconOrder = <NeoLauncherIcon>[
   NeoLauncherIcon.denial,
 ];
 
-String neoLauncherIconLabel(NeoLauncherIcon icon) => switch (icon) {
-  NeoLauncherIcon.grid => '默认',
-  NeoLauncherIcon.system => '系统',
-  NeoLauncherIcon.custom => '自定义',
-  NeoLauncherIcon.denial => 'Denial',
-};
-
-String neoLauncherIconDescription(NeoLauncherIcon icon) => switch (icon) {
-  NeoLauncherIcon.grid => '九宫格图标，任何机器上都能用',
-  NeoLauncherIcon.system => '按发行版选图标，找不到就用默认',
-  NeoLauncherIcon.custom => '自己选一张图片（SVG / PNG / JPEG / WebP / GIF）',
-  NeoLauncherIcon.denial => '等 Denial 官方图标，暂时不能用',
-};
-
 /// Whether the settings let [icon] be picked.
 ///
 /// Only [NeoLauncherIcon.denial] is not: it is listed so the option is visibly

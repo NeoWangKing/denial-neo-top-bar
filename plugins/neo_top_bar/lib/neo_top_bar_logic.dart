@@ -10,6 +10,7 @@ export 'src/core/config.dart';
 export 'src/core/control_center_model.dart';
 export 'src/core/drop_target.dart';
 export 'src/core/launcher_options.dart';
+export 'src/core/l10n.dart';
 export 'src/core/module_defaults.dart';
 export 'src/core/module_descriptor.dart';
 export 'src/core/popup_geometry.dart';

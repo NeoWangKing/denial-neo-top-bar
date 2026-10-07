@@ -13,6 +13,7 @@ import 'package:denial_flutter_sdk/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/l10n_context.dart';
 import '../core/module.dart';
 import '../core/module_defaults.dart';
 import '../core/module_descriptor.dart';
@@ -44,11 +45,14 @@ class _NotificationsContent extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final s = context.neoStrings;
     final state = ref.watch(desktopNotificationsProvider);
     final unread = state.unreadCount;
     final theme = ShellTheme.of(context);
     final active = state.active.length;
-    final tooltip = unread > 0 ? '$unread 条未读通知' : '通知';
+    final tooltip = unread > 0
+        ? s.unreadNotifications(unread)
+        : s.notifications;
 
     return NeoCardButton(
       accent: module.accent,
@@ -155,6 +159,7 @@ class NeoNotificationsPanel extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final s = context.neoStrings;
     final theme = ShellTheme.of(context);
     final state = ref.watch(desktopNotificationsProvider);
     final controller = ref.read(desktopNotificationsProvider.notifier);
@@ -176,7 +181,7 @@ class NeoNotificationsPanel extends ConsumerWidget {
             children: [
               Expanded(
                 child: Text(
-                  '通知',
+                  s.notificationsPanelTitle,
                   style: theme.text.systemBarValue.copyWith(fontSize: 15),
                 ),
               ),
@@ -184,12 +189,14 @@ class NeoNotificationsPanel extends ConsumerWidget {
                 icon: state.doNotDisturb
                     ? Icons.do_not_disturb_on
                     : Icons.do_not_disturb_off_outlined,
-                tooltip: state.doNotDisturb ? '关闭免打扰' : '开启免打扰',
+                tooltip: state.doNotDisturb
+                    ? s.notificationsDisableDnd
+                    : s.notificationsEnableDnd,
                 onPressed: controller.toggleDoNotDisturb,
               ),
               NeoPopupIconButton(
                 icon: Icons.delete_sweep_outlined,
-                tooltip: '全部清除',
+                tooltip: s.notificationsClearAll,
                 onPressed: records.isEmpty ? () {} : controller.clearAll,
               ),
             ],
@@ -200,7 +207,7 @@ class NeoNotificationsPanel extends ConsumerWidget {
               padding: const EdgeInsets.symmetric(vertical: 26),
               child: Center(
                 child: Text(
-                  '没有通知',
+                  s.notificationsEmpty,
                   style: theme.text.systemBarCaption.copyWith(
                     color: theme.colors.textTertiary,
                   ),
@@ -235,6 +242,7 @@ class _NotificationTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final s = context.neoStrings;
     final theme = ShellTheme.of(context);
     final notification = record.notification;
     final urgencyColor = switch (notification.urgency) {
@@ -309,7 +317,7 @@ class _NotificationTile extends StatelessWidget {
         ),
         NeoPopupIconButton(
           icon: Icons.close,
-          tooltip: '忽略',
+          tooltip: s.notificationsDismiss,
           onPressed: () => controller.dismissFromHistory(notification.id),
         ),
       ],

@@ -19,6 +19,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/control_center_model.dart';
+import '../core/l10n.dart';
+import '../core/l10n_context.dart';
 import '../core/module.dart';
 import '../core/module_defaults.dart';
 import '../core/module_descriptor.dart';
@@ -50,18 +52,19 @@ class ControlCenterModule implements NeoModule, NeoModuleSettings {
   /// has never been customised stays empty.
   @override
   Widget buildSettings(BuildContext context, NeoModuleSettingsScope scope) {
+    final s = context.neoStrings;
     final options = neoControlCenterOptions(scope.options);
     final glyphs = options.glyphs;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         NeoSettingGroup(
-          title: '胶囊上显示',
+          title: s.pillGlyphs,
           children: [
             for (final glyph in neoPillGlyphOrder)
               NeoSettingRow(
-                label: neoPillGlyphLabel(glyph),
-                description: neoPillGlyphDescription(glyph),
+                label: s.pillGlyphLabel(glyph),
+                description: s.pillGlyphDescription(glyph),
                 child: Builder(
                   builder: (context) {
                     final selected = glyphs.contains(glyph);
@@ -77,7 +80,7 @@ class ControlCenterModule implements NeoModule, NeoModuleSettings {
                               neoControlCenterGlyphsKey,
                               _encodeGlyphs(glyphs, glyph, value),
                             ),
-                      tooltip: locked ? '至少留一个，否则胶囊会是空白' : null,
+                      tooltip: locked ? s.pillGlyphsAtLeastOne : null,
                     );
                   },
                 ),
@@ -86,12 +89,12 @@ class ControlCenterModule implements NeoModule, NeoModuleSettings {
         ),
         const SizedBox(height: 14),
         NeoSettingGroup(
-          title: '电源按钮',
+          title: s.powerButtons,
           children: [
             for (final action in NeoPowerAction.values)
               NeoSettingRow(
-                label: neoPowerActionLabel(action),
-                description: _powerDescription(action),
+                label: s.powerActionLabel(action),
+                description: _powerDescription(action, s),
                 child: NeoSettingToggle(
                   value: options.powerActions.contains(action),
                   onChanged: (value) => scope.setOption(
@@ -149,14 +152,15 @@ List<String>? _encodePower(
   ];
 }
 
-String _powerDescription(NeoPowerAction action) => switch (action) {
-  NeoPowerAction.lock => '立即锁屏，不需要确认',
-  NeoPowerAction.logout => '注销当前会话，会先问一次',
-  NeoPowerAction.suspend => '睡眠，默认不在这一行里',
-  NeoPowerAction.hibernate => '休眠，默认不在这一行里',
-  NeoPowerAction.reboot => '重启，会先问一次',
-  NeoPowerAction.powerOff => '关机，会先问一次',
-};
+String _powerDescription(NeoPowerAction action, NeoStrings s) =>
+    switch (action) {
+      NeoPowerAction.lock => s.powerLockHint,
+      NeoPowerAction.logout => s.powerLogoutHint,
+      NeoPowerAction.suspend => s.powerSuspendHint,
+      NeoPowerAction.hibernate => s.powerHibernateHint,
+      NeoPowerAction.reboot => s.powerRebootHint,
+      NeoPowerAction.powerOff => s.powerShutdownHint,
+    };
 
 class _ControlCenterContent extends ConsumerWidget {
   const _ControlCenterContent({required this.module});
@@ -165,6 +169,7 @@ class _ControlCenterContent extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final s = context.neoStrings;
     final theme = ShellTheme.of(context);
     final volume = ref.watch(neoVolumeProvider);
     final network = ref.watch(networkConnectivityProvider);
@@ -206,7 +211,7 @@ class _ControlCenterContent extends ConsumerWidget {
           },
           size: size,
           color: glyph,
-          tooltip: muted ? '音量（静音）· 右键取消静音' : '音量 · 右键静音',
+          tooltip: muted ? s.glyphVolumeMutedTooltip : s.glyphVolumeTooltip,
           onTap: openPanel,
           onSecondary: ref.read(neoVolumeProvider.notifier).toggleMute,
         ),
@@ -226,10 +231,10 @@ class _ControlCenterContent extends ConsumerWidget {
             NeoNetworkGlyph.offline || NeoNetworkGlyph.wifiOff => dim,
           },
           tooltip: switch (glyphState) {
-            NeoNetworkGlyph.ethernet => '有线网络 · 右键开关无线',
-            NeoNetworkGlyph.wifi => 'Wi-Fi · 右键关闭无线',
-            NeoNetworkGlyph.offline => '无线未连接 · 右键关闭无线',
-            NeoNetworkGlyph.wifiOff => '无线已关闭 · 右键开启无线',
+            NeoNetworkGlyph.ethernet => s.glyphWiredTooltip,
+            NeoNetworkGlyph.wifi => s.glyphWifiTooltip,
+            NeoNetworkGlyph.offline => s.glyphWifiDisconnectedTooltip,
+            NeoNetworkGlyph.wifiOff => s.glyphWifiOffTooltip,
           },
           onTap: openPanel,
           onSecondary: network.snapshot.wifiDeviceAvailable
@@ -245,7 +250,7 @@ class _ControlCenterContent extends ConsumerWidget {
               : Icons.bluetooth,
           size: size,
           color: glyph,
-          tooltip: '蓝牙 · 右键关闭',
+          tooltip: s.glyphBluetoothTooltip,
           onTap: openPanel,
           onSecondary: ref.read(bluetoothProvider.notifier).togglePower,
         ),
@@ -256,7 +261,7 @@ class _ControlCenterContent extends ConsumerWidget {
             label: '$capacity%',
             size: size,
             color: battery.charging ? theme.accent : glyph,
-            tooltip: '电量 $capacity%',
+            tooltip: s.batteryTooltip(capacity),
             // No secondary action: there is no "toggle the battery", and inventing
             // one would only misfire.
             onTap: openPanel,
@@ -267,14 +272,21 @@ class _ControlCenterContent extends ConsumerWidget {
       accent: module.accent,
       density: module.density,
       horizontal: module.horizontal,
-      tooltip: '控制中心',
+      tooltip: s.moduleLabel(NeoModuleIds.controlCenter),
       onPressed: openPanel,
       child: Center(
-        child: Row(
+        child: Flex(
+          // A vertical bar has only the strip's width, so a row of glyphs would
+          // run off it; they stack instead, in the same order.
+          direction: module.horizontal ? Axis.horizontal : Axis.vertical,
           mainAxisSize: MainAxisSize.min,
           children: [
             for (var index = 0; index < glyphs.length; index++) ...[
-              if (index > 0) SizedBox(width: gap),
+              if (index > 0)
+                SizedBox(
+                  width: module.horizontal ? gap : 0,
+                  height: module.horizontal ? 0 : gap,
+                ),
               glyphs[index],
             ],
           ],

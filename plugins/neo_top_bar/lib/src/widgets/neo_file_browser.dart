@@ -16,6 +16,8 @@ import 'package:denial_flutter_sdk/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
+import '../core/l10n.dart';
+import '../core/l10n_context.dart';
 import '../core/launcher_options.dart';
 import 'neo_setting_controls.dart';
 
@@ -23,7 +25,7 @@ class NeoFileBrowser extends StatefulWidget {
   const NeoFileBrowser({
     required this.onSelected,
     this.startDirectory,
-    this.title = '选择图片',
+    this.title = '',
     super.key,
   });
 
@@ -98,6 +100,7 @@ class _NeoFileBrowserState extends State<NeoFileBrowser> {
   @override
   Widget build(BuildContext context) {
     final theme = ShellTheme.of(context);
+    final s = context.neoStrings;
     final parent = neoParentDirectory(_directory);
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -114,14 +117,14 @@ class _NeoFileBrowserState extends State<NeoFileBrowser> {
               children: [
                 Expanded(
                   child: Text(
-                    widget.title,
+                    widget.title.isEmpty ? s.chooseImage : widget.title,
                     style: theme.text.systemBarValue.copyWith(fontSize: 13),
                   ),
                 ),
                 if (parent != null)
                   _BrowserAction(
                     icon: Icons.arrow_upward,
-                    label: '上一级',
+                    label: s.parentDirectory,
                     onPressed: _up,
                   ),
               ],
@@ -139,14 +142,14 @@ class _NeoFileBrowserState extends State<NeoFileBrowser> {
             const SizedBox(height: 8),
             if (_error case final error?)
               Text(
-                '打不开这个目录：$error',
+                s.openDirectoryFailed(error),
                 style: theme.text.systemBarCaption.copyWith(
                   color: theme.colors.performanceWarning,
                 ),
               )
             else if (_entries.isEmpty)
               Text(
-                '这个目录里没有子目录或图片。',
+                s.directoryEmpty,
                 style: theme.text.systemBarCaption.copyWith(
                   color: theme.colors.textTertiary,
                 ),
@@ -264,7 +267,7 @@ class NeoImagePathField extends StatelessWidget {
     required this.onChanged,
     this.browsing = false,
     this.onBrowse,
-    this.hint = '还没有选择图片',
+    this.hint = '',
     super.key,
   });
 
@@ -280,27 +283,30 @@ class NeoImagePathField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShellTheme.of(context);
+    final s = context.neoStrings;
     final chosen = path.isNotEmpty;
     return NeoSettingRow(
       // The file's own name, with its directory underneath: an absolute path can
       // be longer than the row and reads worse than the name it ends with.
-      label: chosen ? neoFileName(path) : hint,
+      label: chosen
+          ? neoFileName(path)
+          : (hint.isEmpty ? s.noImageSelected : hint),
       description: chosen
-          ? '${neoParentDirectory(path) ?? ''} · ${_describe(path)}'
-          : '点右边的按钮挑一张图片',
+          ? '${neoParentDirectory(path) ?? ''} · ${_describe(path, s)}'
+          : s.pickImageHint,
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           if (onBrowse != null)
             _BrowserAction(
               icon: browsing ? Icons.expand_less : Icons.folder_open,
-              label: browsing ? '收起' : '浏览文件',
+              label: browsing ? s.collapse : s.browseFiles,
               onPressed: onBrowse!,
             ),
           if (chosen)
             _BrowserAction(
               icon: Icons.close,
-              label: '清除',
+              label: s.clear,
               onPressed: () => onChanged(null),
             ),
           if (chosen) ...[
@@ -316,9 +322,9 @@ class NeoImagePathField extends StatelessWidget {
     );
   }
 
-  static String _describe(String path) {
+  static String _describe(String path, NeoStrings s) {
     final dot = path.lastIndexOf('.');
-    if (dot <= 0) return '自定义图片';
+    if (dot <= 0) return s.customImage;
     return path.substring(dot + 1).toUpperCase();
   }
 }
@@ -332,10 +338,11 @@ class _Thumbnail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final s = context.neoStrings;
     final file = File(path);
     if (!file.existsSync()) {
       return Tooltip(
-        message: '这个文件不在了',
+        message: s.fileMissing,
         child: Icon(
           Icons.broken_image_outlined,
           size: 18,

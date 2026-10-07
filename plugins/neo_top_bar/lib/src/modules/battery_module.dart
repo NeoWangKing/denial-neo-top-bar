@@ -7,6 +7,7 @@ import 'package:denial_flutter_sdk/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/l10n_context.dart';
 import '../core/module.dart';
 import '../core/module_defaults.dart';
 import '../core/module_descriptor.dart';
@@ -33,6 +34,7 @@ class _BatteryContent extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final s = context.neoStrings;
     final services = module.services;
     final status = ref.watch(services.battery);
     final capacity = status.capacity;
@@ -45,54 +47,68 @@ class _BatteryContent extends ConsumerWidget {
     final statusLabel = strings.batteryLine(state, capacity);
     final level = (capacity / 100).clamp(0.0, 1.0).toDouble();
 
-    return NeoCardButton(
-      accent: module.accent,
-      density: module.density,
-      horizontal: module.horizontal,
-      tooltip: '打开电源设置',
-      onPressed: services.openPowerSettings,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Semantics(
-            label: '${strings.batteryTitle}, $statusLabel',
-            child: SizedBox(
-              width: 24,
-              height: 14,
-              child: CustomPaint(
-                painter: _BatteryLevelPainter(
-                  level: level,
-                  charging: status.charging,
-                  accent: theme.accent,
-                  outline: module.accent.captionColor(theme),
-                  foreground: theme.colors.textPrimary,
-                  cornerRadiusScale: theme.cornerRadiusScale,
-                ),
-              ),
-            ),
+    final gauge = Semantics(
+      label: '${strings.batteryTitle}, $statusLabel',
+      child: SizedBox(
+        width: 24,
+        height: 14,
+        child: CustomPaint(
+          painter: _BatteryLevelPainter(
+            level: level,
+            charging: status.charging,
+            accent: theme.accent,
+            outline: module.accent.captionColor(theme),
+            foreground: theme.colors.textPrimary,
+            cornerRadiusScale: theme.cornerRadiusScale,
           ),
-          const SizedBox(width: 7),
-          SizedBox(
-            width: 34,
-            child: Text.rich(
-              TextSpan(
-                text: strings.numberValue(capacity),
-                style: ShellText.systemBarValue,
-                children: [
-                  TextSpan(
-                    text: strings.percentSign,
-                    style: ShellText.systemBarCaption.copyWith(
-                      color: module.accent.captionColor(theme),
-                    ),
-                  ),
-                ],
-              ),
-              textAlign: TextAlign.right,
-              maxLines: 1,
+        ),
+      ),
+    );
+    final percentage = Text.rich(
+      TextSpan(
+        text: strings.numberValue(capacity),
+        style: ShellText.systemBarValue,
+        children: [
+          TextSpan(
+            text: strings.percentSign,
+            style: ShellText.systemBarCaption.copyWith(
+              color: module.accent.captionColor(theme),
             ),
           ),
         ],
       ),
+      textAlign: TextAlign.right,
+      maxLines: 1,
+    );
+
+    return NeoCardButton(
+      accent: module.accent,
+      density: module.density,
+      horizontal: module.horizontal,
+      tooltip: s.openPowerSettings,
+      onPressed: services.openPowerSettings,
+      child: module.horizontal
+          ? Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                gauge,
+                const SizedBox(width: 7),
+                SizedBox(width: 34, child: percentage),
+              ],
+            )
+          // Vertical: the same gauge turned on its side, because a battery reads
+          // as a cell either way and the strip has no width to spare. Turning it
+          // also keeps the painter's vector drawing crisp — nothing is scaled.
+          // `quarterTurns: 3` puts the terminal at the top, which is how a
+          // vertical cell is drawn.
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                RotatedBox(quarterTurns: 3, child: gauge),
+                const SizedBox(height: 5),
+                FittedBox(fit: BoxFit.scaleDown, child: percentage),
+              ],
+            ),
     );
   }
 }

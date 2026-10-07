@@ -8,11 +8,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/calendar_data.dart';
+import '../core/l10n_context.dart';
 import '../core/module.dart';
 import '../widgets/neo_popup_surface.dart';
-
-/// Weekday headers, Monday first, matching the grid's default column start.
-const List<String> _weekdayLabels = <String>['一', '二', '三', '四', '五', '六', '日'];
 
 /// Opens the calendar panel centered on the bar's output.
 ///
@@ -70,6 +68,7 @@ class _NeoCalendarPanelState extends ConsumerState<NeoCalendarPanel> {
 
   @override
   Widget build(BuildContext context) {
+    final s = context.neoStrings;
     final theme = ShellTheme.of(context);
     final now = ref.watch(widget.services.clock).value ?? DateTime.now();
     final month = _month ?? neoMonthStart(now);
@@ -88,25 +87,25 @@ class _NeoCalendarPanelState extends ConsumerState<NeoCalendarPanel> {
             children: [
               Expanded(
                 child: Text(
-                  '${month.year} 年 ${month.month} 月',
+                  s.calendarMonthTitle(month.year, month.month),
                   style: theme.text.systemBarValue.copyWith(fontSize: 15),
                 ),
               ),
               NeoPopupIconButton(
                 icon: Icons.chevron_left,
-                tooltip: '上个月',
+                tooltip: s.previousMonth,
                 onPressed: () =>
                     setState(() => _month = neoAddMonths(month, -1)),
               ),
               NeoPopupIconButton(
                 icon: Icons.chevron_right,
-                tooltip: '下个月',
+                tooltip: s.nextMonth,
                 onPressed: () =>
                     setState(() => _month = neoAddMonths(month, 1)),
               ),
               NeoPopupIconButton(
                 icon: Icons.today,
-                tooltip: '回到今天',
+                tooltip: s.backToToday,
                 onPressed: () =>
                     setState(() => _month = neoMonthStart(DateTime.now())),
               ),
@@ -115,7 +114,7 @@ class _NeoCalendarPanelState extends ConsumerState<NeoCalendarPanel> {
           const SizedBox(height: 10),
           Row(
             children: [
-              for (final label in _weekdayLabels)
+              for (final label in s.calendarWeekdays)
                 Expanded(
                   child: Center(
                     child: Text(

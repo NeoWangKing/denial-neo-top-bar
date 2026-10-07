@@ -35,6 +35,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/control_center_model.dart';
+import '../core/l10n.dart';
+import '../core/l10n_context.dart';
 import '../core/module.dart';
 import '../core/settings_requests.dart';
 import '../widgets/neo_popup_surface.dart';
@@ -122,6 +124,7 @@ class _NeoControlCenterPanelState extends ConsumerState<NeoControlCenterPanel> {
 
   @override
   Widget build(BuildContext context) {
+    final s = context.neoStrings;
     final network = ref.watch(networkConnectivityProvider);
     final bluetooth = ref.watch(bluetoothProvider);
     final notifications = ref.watch(desktopNotificationsProvider);
@@ -199,7 +202,7 @@ class _NeoControlCenterPanelState extends ConsumerState<NeoControlCenterPanel> {
                       ? Icons.wifi
                       : Icons.wifi_off,
                   title: 'Wi-Fi',
-                  subtitle: _networkSubtitle(network),
+                  subtitle: _networkSubtitle(network, s),
                   active: network.snapshot.wirelessEnabled,
                   busy: network.radioChanging || network.initializing,
                   enabled:
@@ -215,8 +218,8 @@ class _NeoControlCenterPanelState extends ConsumerState<NeoControlCenterPanel> {
                   icon: bluetooth.powered
                       ? Icons.bluetooth
                       : Icons.bluetooth_disabled,
-                  title: '蓝牙',
-                  subtitle: _bluetoothSubtitle(bluetooth),
+                  title: s.bluetooth,
+                  subtitle: _bluetoothSubtitle(bluetooth, s),
                   active: bluetooth.powered,
                   busy: bluetooth.powerChanging || bluetooth.initializing,
                   enabled: bluetooth.serviceAvailable && bluetooth.available,
@@ -228,8 +231,10 @@ class _NeoControlCenterPanelState extends ConsumerState<NeoControlCenterPanel> {
                   icon: notifications.doNotDisturb
                       ? Icons.do_not_disturb_on
                       : Icons.do_not_disturb_off_outlined,
-                  title: '免打扰',
-                  subtitle: notifications.doNotDisturb ? '已开启' : '已关闭',
+                  title: s.doNotDisturb,
+                  subtitle: notifications.doNotDisturb
+                      ? s.switchedOn
+                      : s.switchedOff,
                   active: notifications.doNotDisturb,
                   onTap: ref
                       .read(desktopNotificationsProvider.notifier)
@@ -239,8 +244,8 @@ class _NeoControlCenterPanelState extends ConsumerState<NeoControlCenterPanel> {
                   icon: dark
                       ? Icons.dark_mode_outlined
                       : Icons.light_mode_outlined,
-                  title: '深浅模式',
-                  subtitle: neoThemeModeLabel(themeMode),
+                  title: s.appearance,
+                  subtitle: s.themeModeLabel(themeMode),
                   active: dark,
                   onTap: () {
                     final controller = ref.read(shellSettingsProvider.notifier);
@@ -331,7 +336,9 @@ class _NeoControlCenterPanelState extends ConsumerState<NeoControlCenterPanel> {
                 if (availability.enabled) return null;
                 final reason = availability.unavailableReason;
                 if (reason != null && reason.isNotEmpty) return reason;
-                if (availability.blockers.isEmpty) return '当前会话不支持';
+                if (availability.blockers.isEmpty) {
+                  return s.notSupportedInSession;
+                }
                 return availability.blockers.join('、');
               },
               // `request` is what decides whether an action runs now or asks
@@ -374,32 +381,32 @@ class _NeoControlCenterPanelState extends ConsumerState<NeoControlCenterPanel> {
     }
   }
 
-  static String _networkSubtitle(NetworkConnectivityState state) {
+  static String _networkSubtitle(NetworkConnectivityState state, NeoStrings s) {
     final snapshot = state.snapshot;
-    if (!snapshot.serviceAvailable) return '服务不可用';
-    if (!snapshot.wifiDeviceAvailable) return '没有无线网卡';
-    if (!snapshot.wirelessEnabled) return '已关闭';
+    if (!snapshot.serviceAvailable) return s.serviceUnavailable;
+    if (!snapshot.wifiDeviceAvailable) return s.noWifiAdapter;
+    if (!snapshot.wirelessEnabled) return s.switchedOff;
     final connected = snapshot.networks.where((entry) => entry.connected);
     if (connected.isNotEmpty) return connected.first.ssid;
     return switch (snapshot.status) {
       NetworkConnectivityStatus.online ||
       NetworkConnectivityStatus.limited ||
       NetworkConnectivityStatus.local ||
-      NetworkConnectivityStatus.captivePortal => '已连接',
-      NetworkConnectivityStatus.connecting => '连接中…',
-      NetworkConnectivityStatus.disabled => '已关闭',
+      NetworkConnectivityStatus.captivePortal => s.connected,
+      NetworkConnectivityStatus.connecting => s.connecting,
+      NetworkConnectivityStatus.disabled => s.switchedOff,
       NetworkConnectivityStatus.unavailable ||
-      NetworkConnectivityStatus.disconnected => '未连接',
+      NetworkConnectivityStatus.disconnected => s.disconnected,
     };
   }
 
-  static String _bluetoothSubtitle(BluetoothState state) {
-    if (!state.serviceAvailable) return '服务不可用';
-    if (!state.available) return '没有适配器';
-    if (!state.powered) return '已关闭';
+  static String _bluetoothSubtitle(BluetoothState state, NeoStrings s) {
+    if (!state.serviceAvailable) return s.serviceUnavailable;
+    if (!state.available) return s.noAdapter;
+    if (!state.powered) return s.switchedOff;
     final connected = state.devices.where((device) => device.connected);
     if (connected.isNotEmpty) return connected.first.name;
-    return state.adapterName.isEmpty ? '已开启' : state.adapterName;
+    return state.adapterName.isEmpty ? s.switchedOn : state.adapterName;
   }
 
   /// The reverse mapping, for the confirmation the provider is holding.
@@ -433,12 +440,13 @@ class _VolumeRow extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final s = context.neoStrings;
     final volume = ref.watch(neoVolumeProvider);
     final controller = ref.read(neoVolumeProvider.notifier);
     final muted = volume.muted || volume.level <= 0;
     return _SliderRow(
       icon: muted ? Icons.volume_off : Icons.volume_up,
-      label: neoVolumeLabel(volume.level, muted: muted),
+      label: s.volumeLabel(volume.level, muted: muted),
       value: volume.ready ? volume.level : 0,
       enabled: volume.ready,
       expanded: expanded,
@@ -451,7 +459,7 @@ class _VolumeRow extends ConsumerWidget {
       onDragEnd: controller.commitLevel,
       trailing: NeoPopupIconButton(
         icon: muted ? Icons.volume_up : Icons.volume_off,
-        tooltip: muted ? '取消静音' : '静音',
+        tooltip: muted ? s.unmute : s.mute,
         onPressed: controller.toggleMute,
       ),
     );
@@ -545,6 +553,7 @@ class _SliderIconState extends State<_SliderIcon> {
 
   @override
   Widget build(BuildContext context) {
+    final s = context.neoStrings;
     final theme = ShellTheme.of(context);
     final active = _hovered || widget.expanded;
     final color = !widget.enabled
@@ -556,7 +565,7 @@ class _SliderIconState extends State<_SliderIcon> {
     );
     if (widget.onTap == null) return content;
     return Tooltip(
-      message: widget.expanded ? '收起详细设置' : '展开详细设置',
+      message: widget.expanded ? s.collapseDetails : s.expandDetails,
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
         onEnter: (_) => setState(() => _hovered = true),
@@ -587,6 +596,7 @@ class _VolumeDetail extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final s = context.neoStrings;
     final theme = ShellTheme.of(context);
     final devices = ref.watch(audioDevicesProvider);
     final apps = ref.watch(appAudioProvider);
@@ -612,10 +622,10 @@ class _VolumeDetail extends ConsumerWidget {
     ]);
 
     return _DetailCard(
-      title: '输出与应用程序',
+      title: s.outputsAndApps,
       action: NeoPopupIconButton(
         icon: Icons.refresh,
-        tooltip: '重新读取',
+        tooltip: s.reload,
         onPressed: () {
           deviceController.refresh();
           ref.read(appAudioProvider.notifier).refresh();
@@ -625,7 +635,9 @@ class _VolumeDetail extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (outputs.isEmpty)
-            _DetailNote(text: devices.loading ? '正在读取输出设备…' : '没有可用的输出设备')
+            _DetailNote(
+              text: devices.loading ? s.loadingOutputs : s.noOutputDevices,
+            )
           else
             for (final device in outputs)
               _DetailRow(
@@ -633,7 +645,7 @@ class _VolumeDetail extends ConsumerWidget {
                 title: device.description.isEmpty
                     ? device.name
                     : device.description,
-                subtitle: device.active ? '正在使用' : '切换',
+                subtitle: device.active ? s.inUse : s.toggle,
                 highlighted: device.active,
                 onTap: () => deviceController.select(device.name),
               ),
@@ -652,7 +664,7 @@ class _VolumeDetail extends ConsumerWidget {
                     .commitVolume(stream.id, value),
               ),
           ] else if (!apps.loading)
-            _DetailNote(text: '当前没有应用程序在播放'),
+            _DetailNote(text: s.noAppPlaying),
           if (apps.error case final error?) _DetailNote(text: error),
           if (devices.error case final error?) _DetailNote(text: error),
         ],
@@ -674,6 +686,7 @@ class _StreamRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final s = context.neoStrings;
     final theme = ShellTheme.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
@@ -702,7 +715,7 @@ class _StreamRow extends StatelessWidget {
           SizedBox(
             width: 34,
             child: Text(
-              neoVolumeLabel(stream.level, muted: stream.muted),
+              s.volumeLabel(stream.level, muted: stream.muted),
               textAlign: TextAlign.right,
               style: theme.text.systemBarCaption.copyWith(
                 fontSize: 10.5,
@@ -730,6 +743,7 @@ class _BrightnessDetail extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final s = context.neoStrings;
     final theme = ShellTheme.of(context);
     final outputs =
         ref.watch(displayLayoutProvider)?.outputs ?? const <DisplayOutput>[];
@@ -738,12 +752,12 @@ class _BrightnessDetail extends ConsumerWidget {
 
     if (outputs.isEmpty) {
       return _DetailCard(
-        title: '显示器亮度',
-        child: const _DetailNote(text: '没有检测到显示器'),
+        title: s.displayBrightness,
+        child: _DetailNote(text: s.noDisplays),
       );
     }
     return _DetailCard(
-      title: '显示器亮度',
+      title: s.displayBrightness,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -1281,6 +1295,7 @@ class _WifiDetail extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final s = context.neoStrings;
     final theme = ShellTheme.of(context);
     final controller = ref.read(networkConnectivityProvider.notifier);
     // The row's id is the host's network identity, which is also the key the
@@ -1300,7 +1315,7 @@ class _WifiDetail extends ConsumerWidget {
     ], limit: 8);
 
     return _DetailCard(
-      title: '网络',
+      title: s.network,
       action: state.scanning
           ? const SizedBox(
               width: 13,
@@ -1309,7 +1324,7 @@ class _WifiDetail extends ConsumerWidget {
             )
           : NeoPopupIconButton(
               icon: Icons.refresh,
-              tooltip: '重新扫描',
+              tooltip: s.rescan,
               onPressed: () => unawaited(controller.scan()),
             ),
       child: entries.isEmpty
@@ -1317,9 +1332,9 @@ class _WifiDetail extends ConsumerWidget {
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Text(
                 switch (state) {
-                  _ when state.scanning => '正在扫描…',
-                  _ when !state.snapshot.wirelessEnabled => '无线已关闭',
-                  _ => '没有找到网络',
+                  _ when state.scanning => s.scanning,
+                  _ when !state.snapshot.wirelessEnabled => s.wirelessOff,
+                  _ => s.noNetworksFound,
                 },
                 style: theme.text.systemBarCaption.copyWith(
                   color: theme.colors.textTertiary,
@@ -1384,6 +1399,7 @@ class _WifiRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final s = context.neoStrings;
     final theme = ShellTheme.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1391,7 +1407,9 @@ class _WifiRow extends StatelessWidget {
         _DetailRow(
           icon: entry.connected ? Icons.wifi : _signalIcon(entry.strength),
           title: entry.ssid,
-          subtitle: entry.connected ? '已连接' : (entry.secured ? '需要密码' : '开放网络'),
+          subtitle: entry.connected
+              ? s.connected
+              : (entry.secured ? s.passwordRequired : s.openNetwork),
           trailing: busy
               ? const SizedBox(
                   width: 12,
@@ -1413,7 +1431,7 @@ class _WifiRow extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(6, 4, 6, 8),
             child: _InlineField(
               controller: password,
-              hint: '输入「${entry.ssid}」的密码',
+              hint: s.enterPassword(entry.ssid),
               onSubmit: onSubmitPassword,
             ),
           ),
@@ -1430,6 +1448,7 @@ class _BluetoothDetail extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final s = context.neoStrings;
     final theme = ShellTheme.of(context);
     final controller = ref.read(bluetoothProvider.notifier);
     final entries = neoBluetoothPanelEntries(<NeoBluetoothEntry>[
@@ -1447,16 +1466,16 @@ class _BluetoothDetail extends ConsumerWidget {
     };
 
     return _DetailCard(
-      title: '蓝牙设备',
+      title: s.bluetoothDevices,
       action: state.scanning
           ? NeoPopupIconButton(
               icon: Icons.stop,
-              tooltip: '停止扫描',
+              tooltip: s.stopScanning,
               onPressed: () => unawaited(controller.stopScan()),
             )
           : NeoPopupIconButton(
               icon: Icons.search,
-              tooltip: '扫描设备',
+              tooltip: s.scanDevices,
               onPressed: () => unawaited(controller.scan()),
             ),
       child: Column(
@@ -1469,9 +1488,9 @@ class _BluetoothDetail extends ConsumerWidget {
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Text(
                 switch (state) {
-                  _ when state.scanning => '正在扫描…',
-                  _ when !state.powered => '蓝牙已关闭',
-                  _ => '没有已配对的设备',
+                  _ when state.scanning => s.scanning,
+                  _ when !state.powered => s.bluetoothOff,
+                  _ => s.noPairedDevices,
                 },
                 style: theme.text.systemBarCaption.copyWith(
                   color: theme.colors.textTertiary,
@@ -1486,8 +1505,8 @@ class _BluetoothDetail extends ConsumerWidget {
                     : Icons.bluetooth,
                 title: entry.name,
                 subtitle: entry.connected
-                    ? '已连接'
-                    : (entry.paired ? '已配对' : '未配对'),
+                    ? s.connected
+                    : (entry.paired ? s.paired : s.notPaired),
                 trailing: state.busyDevices.contains(entry.id)
                     ? const SizedBox(
                         width: 12,
@@ -1516,9 +1535,12 @@ class _PairingPrompt extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final s = context.neoStrings;
     final theme = ShellTheme.of(context);
     final controller = ref.read(bluetoothProvider.notifier);
-    final name = request.deviceName.isEmpty ? '设备' : request.deviceName;
+    final name = request.deviceName.isEmpty
+        ? s.devicesSection
+        : request.deviceName;
     final code = request.passkey?.toString() ?? request.pinCode;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
@@ -1526,7 +1548,7 @@ class _PairingPrompt extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            code == null ? '「$name」请求配对' : '「$name」配对码 $code',
+            code == null ? s.pairRequest(name) : s.pairCode(name, code),
             style: theme.text.systemBarValue.copyWith(fontSize: 12),
           ),
           const SizedBox(height: 6),
@@ -1534,14 +1556,14 @@ class _PairingPrompt extends ConsumerWidget {
             children: [
               Expanded(
                 child: _SmallButton(
-                  label: '拒绝',
+                  label: s.reject,
                   onPressed: () => controller.respondToPairing(accepted: false),
                 ),
               ),
               const SizedBox(width: 6),
               Expanded(
                 child: _SmallButton(
-                  label: '接受',
+                  label: s.accept,
                   primary: true,
                   onPressed: () => controller.respondToPairing(accepted: true),
                 ),
@@ -1578,13 +1600,14 @@ class _PowerRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final s = context.neoStrings;
     final theme = ShellTheme.of(context);
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         _RowButton(
           icon: Icons.edit_outlined,
-          tooltip: '自定义 · 打开组件设置',
+          tooltip: s.customOpenModuleSettings,
           color: theme.colors.textSecondary,
           onPressed: onCustomise,
         ),
@@ -1661,6 +1684,7 @@ class _PowerButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final s = context.neoStrings;
     final theme = ShellTheme.of(context);
     final icon = switch (action) {
       NeoPowerAction.lock => Icons.lock_outline,
@@ -1672,8 +1696,8 @@ class _PowerButton extends StatelessWidget {
     };
     return Tooltip(
       message: enabled
-          ? neoPowerActionLabel(action)
-          : '${neoPowerActionLabel(action)}${reason == null ? '' : '：$reason'}',
+          ? s.powerActionLabel(action)
+          : '${s.powerActionLabel(action)}${reason == null ? '' : '：$reason'}',
       child: MouseRegion(
         cursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
         child: GestureDetector(
@@ -1712,24 +1736,25 @@ class _PowerConfirmation extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final s = context.neoStrings;
     final theme = ShellTheme.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          neoPowerConfirmationQuestion(action),
+          s.powerConfirmationQuestion(action),
           style: theme.text.systemBarValue.copyWith(fontSize: 12),
         ),
         const SizedBox(height: 8),
         Row(
           children: [
             Expanded(
-              child: _SmallButton(label: '取消', onPressed: onCancel),
+              child: _SmallButton(label: s.cancel, onPressed: onCancel),
             ),
             const SizedBox(width: 6),
             Expanded(
               child: _SmallButton(
-                label: neoPowerActionLabel(action),
+                label: s.powerActionLabel(action),
                 primary: true,
                 onPressed: onConfirm,
               ),
@@ -1888,6 +1913,7 @@ class _InlineFieldState extends State<_InlineField> {
 
   @override
   Widget build(BuildContext context) {
+    final s = context.neoStrings;
     final theme = ShellTheme.of(context);
     return Row(
       children: [
@@ -1915,7 +1941,11 @@ class _InlineFieldState extends State<_InlineField> {
           ),
         ),
         const SizedBox(width: 6),
-        _SmallButton(label: '连接', primary: true, onPressed: widget.onSubmit),
+        _SmallButton(
+          label: s.connect,
+          primary: true,
+          onPressed: widget.onSubmit,
+        ),
       ],
     );
   }

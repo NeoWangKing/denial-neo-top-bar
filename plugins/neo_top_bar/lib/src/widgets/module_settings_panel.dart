@@ -26,6 +26,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/config.dart';
 import '../core/config_state.dart';
+import '../core/l10n.dart';
+import '../core/l10n_context.dart';
 import '../core/module.dart';
 import '../core/module_descriptor.dart';
 import '../core/module_registry.dart';
@@ -87,6 +89,7 @@ class NeoModuleSettingsPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShellTheme.of(context);
+    final s = context.neoStrings;
     return AnimatedBuilder(
       animation: state,
       builder: (context, _) {
@@ -116,13 +119,13 @@ class NeoModuleSettingsPanel extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      '顶栏组件',
+                      s.appearanceSettingsTitle,
                       style: theme.text.systemBarValue.copyWith(fontSize: 18),
                     ),
                   ),
                   NeoPopupIconButton(
                     icon: Icons.close,
-                    tooltip: '关闭',
+                    tooltip: s.close,
                     onPressed: onClose,
                   ),
                 ],
@@ -130,9 +133,10 @@ class NeoModuleSettingsPanel extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(top: 4, bottom: 12),
                 child: Text(
-                  '拖动卡片调整同一区内的顺序（越靠上，在横栏上越靠左）；'
-                  '点卡片里的箭头展开它自己的选项；'
-                  '「添加组件」可以把任何组件放进这一段，同一个组件想加几个就加几个。',
+                  '${s.boardHintReorder}'
+                  '${s.boardHintAxis(barIsVertical: false)}'
+                  '${s.boardHintChevron}'
+                  '${s.addModuleHint}',
                   style: theme.text.systemBarCaption.copyWith(
                     color: theme.colors.textTertiary,
                     fontSize: 12,
@@ -145,12 +149,12 @@ class NeoModuleSettingsPanel extends StatelessWidget {
               if (state.loadError case final error?)
                 _PanelMessage(
                   color: theme.colors.textPrimary,
-                  text: '读取配置失败，正在使用默认值：$error',
+                  text: s.loadFailed(error),
                 ),
               if (state.saveError case final error?)
                 _PanelMessage(
                   color: theme.colors.textPrimary,
-                  text: '保存配置失败：$error',
+                  text: s.saveFailed(error),
                 ),
               Flexible(
                 child: ListView(
@@ -221,12 +225,13 @@ class _ZoneHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShellTheme.of(context);
+    final s = context.neoStrings;
     return Padding(
       padding: const EdgeInsets.only(top: 14, bottom: 2),
       child: Row(
         children: [
           Text(
-            zone.label,
+            s.zoneLabel(zone),
             style: theme.text.systemBarValue.copyWith(
               fontSize: 13,
               color: theme.accent,
@@ -275,6 +280,7 @@ class _ZoneSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShellTheme.of(context);
+    final s = context.neoStrings;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -283,7 +289,7 @@ class _ZoneSection extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(bottom: 6),
             child: Text(
-              '这一段还没有组件。',
+              s.zoneEmpty,
               style: theme.text.systemBarCaption.copyWith(
                 color: theme.colors.textTertiary,
               ),
@@ -389,6 +395,7 @@ class _ModuleCardState extends State<_ModuleCard> {
   @override
   Widget build(BuildContext context) {
     final theme = ShellTheme.of(context);
+    final s = context.neoStrings;
     final descriptor = widget.placement.descriptor;
     final module = NeoTopBarModules.byId(descriptor.id);
     final configurable = module is NeoModuleSettings;
@@ -410,7 +417,7 @@ class _ModuleCardState extends State<_ModuleCard> {
               ReorderableDragStartListener(
                 index: widget.index,
                 child: Tooltip(
-                  message: '拖动调整这一区内的顺序',
+                  message: s.dragToReorderZone,
                   child: MouseRegion(
                     cursor: SystemMouseCursors.grab,
                     child: Padding(
@@ -440,7 +447,7 @@ class _ModuleCardState extends State<_ModuleCard> {
                         children: [
                           Expanded(
                             child: Text(
-                              descriptor.label,
+                              s.moduleLabel(descriptor.id),
                               style: theme.text.systemBarValue.copyWith(
                                 fontSize: 14,
                               ),
@@ -465,7 +472,7 @@ class _ModuleCardState extends State<_ModuleCard> {
                         children: [
                           Expanded(
                             child: Text(
-                              descriptor.description,
+                              s.moduleDescription(descriptor.id),
                               style: theme.text.systemBarCaption.copyWith(
                                 color: theme.colors.textTertiary,
                                 fontSize: 12,
@@ -522,6 +529,7 @@ class _ExpandedSettings extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShellTheme.of(context);
+    final s = context.neoStrings;
     return DecoratedBox(
       decoration: BoxDecoration(
         color: theme.colors.surfaceContainer.withValues(alpha: 0.45),
@@ -534,7 +542,7 @@ class _ExpandedSettings extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              '「${placement.descriptor.label}」设置',
+              s.moduleSettingsTitle(s.moduleLabel(placement.descriptor.id)),
               style: theme.text.systemBarCaption.copyWith(
                 fontSize: 12,
                 color: theme.colors.textSecondary,
@@ -559,7 +567,7 @@ class _ExpandedSettings extends StatelessWidget {
               )
             else
               Text(
-                '这个组件暂时没有自己的设置。',
+                s.moduleHasNoSettings,
                 style: theme.text.systemBarCaption.copyWith(
                   color: theme.colors.textTertiary,
                 ),
@@ -595,6 +603,7 @@ class _AddModuleButtonState extends State<_AddModuleButton> {
   @override
   Widget build(BuildContext context) {
     final theme = ShellTheme.of(context);
+    final s = context.neoStrings;
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Column(
@@ -602,7 +611,7 @@ class _AddModuleButtonState extends State<_AddModuleButton> {
         children: [
           _OutlineButton(
             icon: _open ? Icons.expand_less : Icons.add,
-            label: '添加组件',
+            label: s.addModule,
             onPressed: () => setState(() => _open = !_open),
           ),
           if (_open) ...[
@@ -654,6 +663,7 @@ class _AddCandidateRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShellTheme.of(context);
+    final s = context.neoStrings;
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
@@ -667,7 +677,7 @@ class _AddCandidateRow extends StatelessWidget {
               const SizedBox(width: 9),
               Expanded(
                 child: Text(
-                  descriptor.label,
+                  s.moduleLabel(descriptor.id),
                   style: theme.text.systemBarValue.copyWith(fontSize: 13),
                 ),
               ),
@@ -675,7 +685,7 @@ class _AddCandidateRow extends StatelessWidget {
               Text(
                 // Adding a copy is the same gesture as adding the first one, so
                 // there is nothing to distinguish here.
-                '添加',
+                s.add,
                 style: theme.text.systemBarCaption.copyWith(
                   fontSize: 11.5,
                   color: theme.colors.textTertiary,
@@ -716,6 +726,7 @@ class _ExpanderButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShellTheme.of(context);
+    final s = context.neoStrings;
     final color = expanded || highlighted
         ? theme.accent
         : theme.colors.textTertiary;
@@ -739,9 +750,12 @@ class _ExpanderButton extends StatelessWidget {
     return Semantics(
       button: true,
       expanded: expanded,
-      label: expanded ? '收起设置' : '展开设置',
+      label: expanded ? s.collapseSettings : s.expandSettings,
       child: ExcludeSemantics(
-        child: Tooltip(message: expanded ? '收起设置' : '展开设置', child: button),
+        child: Tooltip(
+          message: expanded ? s.collapseSettings : s.expandSettings,
+          child: button,
+        ),
       ),
     );
   }
@@ -763,12 +777,13 @@ class _RemoveButtonState extends State<_RemoveButton> {
   @override
   Widget build(BuildContext context) {
     final theme = ShellTheme.of(context);
+    final s = context.neoStrings;
     return Semantics(
       button: true,
-      label: '从顶栏移除',
+      label: s.removeFromBar,
       child: ExcludeSemantics(
         child: Tooltip(
-          message: '从顶栏移除',
+          message: s.removeFromBar,
           child: MouseRegion(
             cursor: SystemMouseCursors.click,
             onEnter: (_) => setState(() => _hovered = true),
@@ -860,25 +875,26 @@ class _DensityRow extends StatelessWidget {
 
   final NeoTopBarConfigState state;
 
-  static const Map<NeoDensity, String> _labels = <NeoDensity, String>{
-    NeoDensity.compact: '紧凑',
-    NeoDensity.regular: '标准',
-    NeoDensity.comfortable: '宽松',
+  static Map<NeoDensity, String> _labels(NeoStrings s) => <NeoDensity, String>{
+    NeoDensity.compact: s.densityCompact,
+    NeoDensity.regular: s.densityStandard,
+    NeoDensity.comfortable: s.densityRelaxed,
   };
 
   @override
   Widget build(BuildContext context) {
     final theme = ShellTheme.of(context);
+    final s = context.neoStrings;
     return Row(
       children: [
         Expanded(
           child: Text(
-            '间距',
+            s.densityLabel,
             style: theme.text.systemBarValue.copyWith(fontSize: 14),
           ),
         ),
         NeoSettingChips<NeoDensity>(
-          values: _labels,
+          values: _labels(s),
           selected: state.config.density,
           onSelected: state.setDensity,
         ),

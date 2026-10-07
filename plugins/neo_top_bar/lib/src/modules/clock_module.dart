@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/clock_options.dart';
+import '../core/l10n_context.dart';
 import '../core/module.dart';
 import '../core/module_defaults.dart';
 import '../core/module_descriptor.dart';
@@ -41,6 +42,7 @@ class _ClockContent extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final s = context.neoStrings;
     final strings = module.services.strings(context);
     final now = ref.watch(module.services.clock).value;
     final options = neoClockOptions(module.options);
@@ -62,27 +64,45 @@ class _ClockContent extends ConsumerWidget {
       accent: module.accent,
       density: module.density,
       horizontal: module.horizontal,
-      tooltip: '打开日历',
+      tooltip: s.clockOpenCalendar,
       onPressed: () =>
           openNeoCalendarPanel(context, ref, module, neoAnchorRectOf(context)),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (date != null) ...[
-            Text(
-              date,
-              style: ShellText.systemBarCaption.copyWith(
-                color: module.accent.captionColor(ShellTheme.of(context)),
-              ),
+      child: module.horizontal
+          ? Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (date != null) ...[
+                  Text(
+                    date,
+                    style: ShellText.systemBarCaption.copyWith(
+                      color: module.accent.captionColor(ShellTheme.of(context)),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                if (time != null)
+                  Text(time, style: ShellText.systemBarValue)
+                else
+                  const SizedBox(width: 42, height: 14),
+              ],
+            )
+          // A vertical pill is about 33px of usable width, which fits the time
+          // (`20:52` is already ~34px before scaling) and nothing more, so the
+          // date is dropped rather than wrapped: the calendar is one tap away,
+          // and a shrunken date caption would be unreadable anyway. The date is
+          // picked back up on a bar that has room for it.
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (time != null)
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(time, style: ShellText.systemBarValue),
+                  )
+                else
+                  const SizedBox(width: 42, height: 14),
+              ],
             ),
-            const SizedBox(width: 8),
-          ],
-          if (time != null)
-            Text(time, style: ShellText.systemBarValue)
-          else
-            const SizedBox(width: 42, height: 14),
-        ],
-      ),
     );
   }
 }
@@ -96,18 +116,26 @@ class _ClockSettings extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final s = context.neoStrings;
     final options = neoClockOptions(scope.options);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         NeoSettingGroup(
-          title: '时间',
+          title: s.clockTime,
           children: [
             NeoSettingRow(
-              label: '24 小时制',
+              label: s.clockUse24Hour,
               description: options.twentyFourHour
-                  ? '例如 20:52'
-                  : '例如 ${neoFormatClockTime12(20, 52, amLabel: neoMeridiemLabels(_languageCode(context)).am, pmLabel: neoMeridiemLabels(_languageCode(context)).pm)}',
+                  ? s.clockTimeExample24('20:52')
+                  : s.clockTimeExample(
+                      neoFormatClockTime12(
+                        20,
+                        52,
+                        amLabel: s.meridiem.am,
+                        pmLabel: s.meridiem.pm,
+                      ),
+                    ),
               child: NeoSettingToggle(
                 value: options.twentyFourHour,
                 onChanged: (value) =>
@@ -118,11 +146,11 @@ class _ClockSettings extends StatelessWidget {
         ),
         const SizedBox(height: 14),
         NeoSettingGroup(
-          title: '日期',
+          title: s.clockDate,
           children: [
             NeoSettingRow(
-              label: '显示日期',
-              description: '关掉之后胶囊上只剩时间',
+              label: s.clockShowDate,
+              description: s.clockShowDateHint,
               child: NeoSettingToggle(
                 value: options.showDate,
                 onChanged: (value) =>
@@ -131,12 +159,12 @@ class _ClockSettings extends StatelessWidget {
             ),
             if (options.showDate)
               NeoSettingRow(
-                label: '日期格式',
-                description: neoClockDateFormatDescription(options.dateFormat),
+                label: s.clockDateFormat,
+                description: s.clockDateFormatDescription(options.dateFormat),
                 child: NeoSettingChips<NeoClockDateFormat>(
                   values: <NeoClockDateFormat, String>{
                     for (final format in neoClockDateFormatOrder)
-                      format: neoClockDateFormatLabel(format),
+                      format: s.clockDateFormatLabel(format),
                   },
                   selected: options.dateFormat,
                   onSelected: (format) =>
@@ -162,7 +190,7 @@ String _timeText(
   NeoClockOptions options,
 ) {
   if (options.twentyFourHour) return strings.time(now);
-  final labels = neoMeridiemLabels(_languageCode(context));
+  final labels = context.neoStrings.meridiem;
   return neoFormatClockTime12(
     now.hour,
     now.minute,
@@ -202,4 +230,5 @@ NeoDatePattern _patternOf(
   monthName: localizedMonth(context.l10n, now.month),
   weekdayName: localizedWeekday(context.l10n, now.weekday),
   day: now.day,
+  fallback: neoFallbackDatePatternFor(_languageCode(context)),
 );

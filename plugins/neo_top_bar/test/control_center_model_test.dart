@@ -166,7 +166,10 @@ void main() {
 
     test('every state has a label', () {
       for (final mode in NeoThemeMode.values) {
-        expect(neoThemeModeLabel(mode), isNotEmpty);
+        expect(
+          const NeoStrings(NeoLanguage.zh).themeModeLabel(mode),
+          isNotEmpty,
+        );
       }
     });
 
@@ -392,9 +395,14 @@ void main() {
 
     test('every action has a label, and confirmed ones a question', () {
       for (final action in NeoPowerAction.values) {
-        expect(neoPowerActionLabel(action), isNotEmpty);
         expect(
-          neoPowerConfirmationQuestion(action).isNotEmpty,
+          const NeoStrings(NeoLanguage.zh).powerActionLabel(action),
+          isNotEmpty,
+        );
+        expect(
+          const NeoStrings(NeoLanguage.zh)
+              .powerConfirmationQuestion(action)
+              .isNotEmpty,
           neoPowerActionNeedsConfirmation(action),
         );
       }
@@ -478,8 +486,14 @@ void main() {
 
     test('every glyph has a label and a description', () {
       for (final glyph in NeoPillGlyph.values) {
-        expect(neoPillGlyphLabel(glyph), isNotEmpty);
-        expect(neoPillGlyphDescription(glyph), isNotEmpty);
+        expect(
+          const NeoStrings(NeoLanguage.zh).pillGlyphLabel(glyph),
+          isNotEmpty,
+        );
+        expect(
+          const NeoStrings(NeoLanguage.zh).pillGlyphDescription(glyph),
+          isNotEmpty,
+        );
       }
     });
 
@@ -505,11 +519,15 @@ void main() {
 
   group('labels', () {
     test('volume reads as a percentage, or as muted at zero', () {
-      expect(neoVolumeLabel(0.42), '42%');
-      expect(neoVolumeLabel(0.0), '静音');
-      expect(neoVolumeLabel(0.42, muted: true), '静音');
-      expect(neoVolumeLabel(1.5), '100%');
-      expect(neoVolumeLabel(-1), '静音');
+      const zh = NeoStrings(NeoLanguage.zh);
+      const en = NeoStrings(NeoLanguage.en);
+      expect(zh.volumeLabel(0.42), '42%');
+      expect(zh.volumeLabel(0.0), '静音');
+      expect(zh.volumeLabel(0.42, muted: true), '静音');
+      expect(zh.volumeLabel(1.5), '100%');
+      expect(zh.volumeLabel(-1), '静音');
+      expect(en.volumeLabel(0.0), 'Muted');
+      expect(en.volumeLabel(0.42), '42%');
     });
 
     test('brightness never reads as muted', () {

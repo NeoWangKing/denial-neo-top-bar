@@ -7,14 +7,6 @@ enum NeoZone {
   center,
   end;
 
-  /// Human-readable name, shared by the settings panel and the drag preview so
-  /// the two can never disagree about what a zone is called.
-  String get label => switch (this) {
-    NeoZone.start => '左侧',
-    NeoZone.center => '中间',
-    NeoZone.end => '右侧',
-  };
-
   static NeoZone? parse(Object? value) {
     if (value is! String) return null;
     for (final zone in NeoZone.values) {
@@ -28,19 +20,20 @@ enum NeoZone {
 ///
 /// [id] is persisted, so it must stay stable across releases. Renaming an id
 /// silently drops the user's choice for it.
+///
+/// A module's name and description are *not* here: they are words, so they live in
+/// the string catalogue (`l10n.dart`) and are looked up by [id]. A descriptor then
+/// stays a pure fact about layout, which no translation can disagree with, and the
+/// zone's own name is looked up the same way.
 class NeoModuleDescriptor {
   const NeoModuleDescriptor({
     required this.id,
-    required this.label,
-    required this.description,
     required this.zone,
     this.defaultEnabled = true,
     this.priority = 0,
   });
 
   final String id;
-  final String label;
-  final String description;
   final NeoZone zone;
 
   /// Whether a fresh configuration starts with this module enabled. Optional or
