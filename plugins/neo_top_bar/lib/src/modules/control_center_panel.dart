@@ -36,6 +36,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/control_center_model.dart';
 import '../core/module.dart';
+import '../core/settings_requests.dart';
 import '../widgets/neo_popup_surface.dart';
 import 'control_center_volume.dart';
 
@@ -305,6 +306,14 @@ class _NeoControlCenterPanelState extends ConsumerState<NeoControlCenterPanel> {
             ],
             _PowerRow(
               busy: power.busy,
+              onCustomise: () {
+                // Close first: the settings card is a popup of its own, and
+                // bumping the request while this panel still owns the screen
+                // would leave two cards stacked. The bar owns the card, so the
+                // panel only asks for it.
+                widget.onClose();
+                NeoSettingsRequests.instance.request();
+              },
               available: (action) =>
                   power.availabilityFor(_sessionAction(action)).enabled,
               blockedReason: (action) {
@@ -1544,6 +1553,7 @@ class _PowerRow extends StatelessWidget {
     required this.available,
     required this.blockedReason,
     required this.busy,
+    required this.onCustomise,
   });
 
   final ValueChanged<NeoPowerAction> onTap;
@@ -1551,12 +1561,21 @@ class _PowerRow extends StatelessWidget {
   final String? Function(NeoPowerAction action) blockedReason;
   final bool busy;
 
+  /// Opens the surface where this row will grow its extra slots.
+  final VoidCallback onCustomise;
+
   @override
   Widget build(BuildContext context) {
     final theme = ShellTheme.of(context);
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
+        _RowButton(
+          icon: Icons.edit_outlined,
+          tooltip: '自定义 · 打开组件设置',
+          color: theme.colors.textSecondary,
+          onPressed: onCustomise,
+        ),
         for (final action in neoPowerActionOrder)
           _PowerButton(
             action: action,
@@ -1568,6 +1587,47 @@ class _PowerRow extends StatelessWidget {
                 : theme.colors.textSecondary,
           ),
       ],
+    );
+  }
+}
+
+/// A bare icon button in the control row: same plate as a power button, no
+/// session action behind it.
+class _RowButton extends StatelessWidget {
+  const _RowButton({
+    required this.icon,
+    required this.tooltip,
+    required this.color,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final Color color;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShellTheme.of(context);
+    return Tooltip(
+      message: tooltip,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onPressed,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: theme.colors.tileOff.withValues(alpha: 0.55),
+              borderRadius: BorderRadius.circular(theme.roundButtonRadius),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              child: Icon(icon, size: 17, color: color),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

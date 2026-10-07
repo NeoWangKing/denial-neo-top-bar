@@ -361,11 +361,15 @@ List<NeoAppStream> neoAppStreamEntries(
 /// uses this enum to decide what a tap means.
 enum NeoPowerAction { lock, logout, suspend, hibernate, reboot, powerOff }
 
-/// The order the power row shows its buttons in, least destructive first.
+/// The actions the power row shows, least destructive first.
+///
+/// Sleep and hibernate are deliberately absent. They are reversible and rarely
+/// wanted on a desktop, and every extra button narrows the row enough that the
+/// remaining ones get harder to hit; the enum still carries them (and the
+/// confirmation rule below still answers for them) so a future customisable row
+/// can offer them again without re-deriving their behaviour.
 const List<NeoPowerAction> neoPowerActionOrder = <NeoPowerAction>[
   NeoPowerAction.lock,
-  NeoPowerAction.suspend,
-  NeoPowerAction.hibernate,
   NeoPowerAction.logout,
   NeoPowerAction.reboot,
   NeoPowerAction.powerOff,

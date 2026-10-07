@@ -400,10 +400,18 @@ void main() {
       }
     });
 
-    test('the row lists every action exactly once', () {
-      expect(neoPowerActionOrder.toSet(), NeoPowerAction.values.toSet());
-      expect(neoPowerActionOrder.first, NeoPowerAction.lock);
-      expect(neoPowerActionOrder.last, NeoPowerAction.powerOff);
+    test('the row shows the four session actions, least destructive first', () {
+      expect(neoPowerActionOrder, <NeoPowerAction>[
+        NeoPowerAction.lock,
+        NeoPowerAction.logout,
+        NeoPowerAction.reboot,
+        NeoPowerAction.powerOff,
+      ]);
+      // Sleep and hibernate stay implemented (the label and confirmation tests
+      // above cover them) but are not offered: a six-button row squeezed every
+      // target too small to hit comfortably.
+      expect(neoPowerActionOrder, isNot(contains(NeoPowerAction.suspend)));
+      expect(neoPowerActionOrder, isNot(contains(NeoPowerAction.hibernate)));
     });
   });
 
