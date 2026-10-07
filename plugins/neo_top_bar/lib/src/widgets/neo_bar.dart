@@ -159,7 +159,8 @@ class _BarContent extends StatefulWidget {
   State<_BarContent> createState() => _BarContentState();
 }
 
-class _BarContentState extends State<_BarContent> {
+class _BarContentState extends State<_BarContent>
+    with SingleTickerProviderStateMixin {
   /// The strip's coordinate space, for placing the drag feedback.
   final GlobalKey _stripKey = GlobalKey(debugLabel: 'neo-top-bar-strip');
 
@@ -174,13 +175,19 @@ class _BarContentState extends State<_BarContent> {
   Offset? _feedbackCenter;
 
   /// Vector from the pointer to the dragged pill's centre, captured when the
-  /// drag starts.
+  /// drag starts, along the bar's own axis.
   ///
-  /// Keeping it is what stops the pill from jumping: without it the feedback's
-  /// centre is pinned to the pointer, so the moment a long press lands the pill
-  /// teleports out from under the finger. With it the pill stays exactly where
-  /// it was grabbed and simply follows.
+  /// It is animated away rather than applied as-is: the pill is picked up where
+  /// it was grabbed and then slides until its centre sits under the pointer, so a
+  /// long press reads as picking the pill up instead of teleporting it.
   Offset _grabDelta = Offset.zero;
+
+  /// 0 leaves the grab offset in full effect; 1 means the pill is centred on the
+  /// pointer. Starts settled, because outside a drag there is nothing to offset.
+  late final AnimationController _grab = AnimationController.unbounded(
+    vsync: this,
+    value: 1,
+  );
 
   String? _targetBeforeId;
   NeoZone? _targetZone;
@@ -204,6 +211,34 @@ class _BarContentState extends State<_BarContent> {
   Map<String, Widget> _dragChildren = const <String, Widget>{};
 
   bool get _horizontal => widget.side.isHorizontal;
+
+  /// The grab offset still in effect. Only the bar's own axis is animated: the
+  /// strip is only a pill tall, so moving the pill across that axis would just
+  /// clip it against the strip edges instead of centring anything.
+  Offset get _currentGrabDelta {
+    final remaining = 1 - _grab.value;
+    if (remaining == 0) return Offset.zero;
+    return _horizontal
+        ? Offset(_grabDelta.dx * remaining, _grabDelta.dy)
+        : Offset(_grabDelta.dx, _grabDelta.dy * remaining);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _grab.addListener(_handleGrabTick);
+  }
+
+  void _handleGrabTick() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _grab.removeListener(_handleGrabTick);
+    _grab.dispose();
+    super.dispose();
+  }
 
   NeoModuleContext get _moduleContext => NeoModuleContext(
     services: widget.services,
@@ -277,6 +312,9 @@ class _BarContentState extends State<_BarContent> {
     } else {
       _grabDelta = Offset.zero;
     }
+    // Start with the offset in full effect: the first frame of the drag puts the
+    // pill exactly where it was grabbed, so nothing jumps.
+    _grab.value = 0;
     setState(() {
       _dragRects = rects;
       _dragZones = zones;
@@ -289,6 +327,16 @@ class _BarContentState extends State<_BarContent> {
       _moveFeedback(globalPosition);
       _updateTarget(globalPosition);
     });
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _grab.value = 1;
+    } else {
+      springTo(
+        _grab,
+        1,
+        spring: Motion.gentle,
+        telemetryLabel: 'neo_top_bar.pill_centre',
+      );
+    }
   }
 
   void _updateDrag(Offset globalPosition) {
@@ -301,7 +349,7 @@ class _BarContentState extends State<_BarContent> {
   void _moveFeedback(Offset globalPosition) {
     final strip = _stripKey.currentContext?.findRenderObject();
     _feedbackCenter = strip is RenderBox && strip.attached
-        ? strip.globalToLocal(globalPosition) + _grabDelta
+        ? strip.globalToLocal(globalPosition) + _currentGrabDelta
         : null;
   }
 
@@ -313,9 +361,9 @@ class _BarContentState extends State<_BarContent> {
   /// the workspaces land next to the launcher: crossing the middle of a zone's
   /// last pill flipped the answer into the following zone.
   void _updateTarget(Offset globalPosition) {
-    // Where the pill is, not where the cursor is: they differ by the grab
-    // offset, and the drop should follow the pill the user is looking at.
-    final dragged = globalPosition + _grabDelta;
+    // Where the pill is, not where the cursor is: they differ until the pill has
+    // finished centring, and the drop should follow the pill the user sees.
+    final dragged = globalPosition + _currentGrabDelta;
     final pointer = _horizontal ? dragged.dx : dragged.dy;
     final zone = neoDropZoneAt(
       mainAxisPosition: pointer,
@@ -376,6 +424,7 @@ class _BarContentState extends State<_BarContent> {
   }
 
   void _clearDrag() {
+    _grab.stop();
     setState(() {
       _draggingId = null;
       _feedbackCenter = null;
