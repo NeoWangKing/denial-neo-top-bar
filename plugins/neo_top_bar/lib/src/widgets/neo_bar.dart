@@ -132,7 +132,11 @@ class _NeoTopBarState extends ConsumerState<NeoTopBar> {
 /// Deliberately a duration and curve rather than a spring. The spring tokens
 /// settle in about 0.2s and are front-loaded, which reads as a snap followed by a
 /// slow creep; picking a pill up should feel deliberate and continuous.
-const Duration _pickUpDuration = Duration(milliseconds: 450);
+///
+/// A symmetric emphasised ease, shortened rather than replaced: the decelerating
+/// curves start far too fast (Motion.md3EmphasizedDecelerate covers most of the
+/// distance in the first tenth), which is the snap this is meant to avoid.
+const Duration _pickUpDuration = Duration(milliseconds: 360);
 const Curve _pickUpCurve = Motion.md3Emphasized;
 
 class _PillSlot {
@@ -188,13 +192,18 @@ class _BarContentState extends State<_BarContent>
   /// arrived, which is why the centring slide never happened on its own.
   Offset? _pointerLocal;
 
-  /// Vector from the pointer to the dragged pill's centre, captured when the
-  /// drag starts, along the bar's own axis.
+  /// Distance, along the bar's own axis, from the pointer to the dragged pill's
+  /// centre when it was grabbed. Animated to zero so the pill settles under the
+  /// pointer instead of teleporting there.
+  double _grabMain = 0;
+
+  /// Cross-axis position of the dragged pill, in strip coordinates, held for the
+  /// whole drag.
   ///
-  /// It is animated away rather than applied as-is: the pill is picked up where
-  /// it was grabbed and then slides until its centre sits under the pointer, so a
-  /// long press reads as picking the pill up instead of teleporting it.
-  Offset _grabDelta = Offset.zero;
+  /// The pill is nearly as tall as the strip, so following the pointer across the
+  /// bar would only slide it out of the strip and clip it. A reorder is a move
+  /// along the bar, so that axis is the only one that moves.
+  double _anchorCross = 0;
 
   /// 0 leaves the grab offset in full effect; 1 means the pill is centred on the
   /// pointer. Starts settled, because outside a drag there is nothing to offset.
@@ -226,15 +235,17 @@ class _BarContentState extends State<_BarContent>
 
   bool get _horizontal => widget.side.isHorizontal;
 
-  /// The grab offset still in effect. Only the bar's own axis is animated: the
-  /// strip is only a pill tall, so moving the pill across that axis would just
-  /// clip it against the strip edges instead of centring anything.
-  Offset get _currentGrabDelta {
-    final remaining = 1 - _grab.value;
-    if (remaining == 0) return Offset.zero;
+  /// The grab distance still in effect: full when the drag starts, zero once the
+  /// pill has settled under the pointer.
+  double get _currentGrabMain => _grabMain * (1 - _grab.value);
+
+  /// Centre of the drag feedback, in strip coordinates.
+  Offset _feedbackCentre(Offset pointerLocal) {
+    final main =
+        (_horizontal ? pointerLocal.dx : pointerLocal.dy) + _currentGrabMain;
     return _horizontal
-        ? Offset(_grabDelta.dx * remaining, _grabDelta.dy)
-        : Offset(_grabDelta.dx, _grabDelta.dy * remaining);
+        ? Offset(main, _anchorCross)
+        : Offset(_anchorCross, main);
   }
 
   @override
@@ -322,9 +333,13 @@ class _BarContentState extends State<_BarContent>
     if (strip is RenderBox && strip.attached && grabbed != null) {
       final pointerLocal = strip.globalToLocal(globalPosition);
       final centreLocal = strip.globalToLocal(grabbed.center);
-      _grabDelta = centreLocal - pointerLocal;
+      _grabMain = _horizontal
+          ? centreLocal.dx - pointerLocal.dx
+          : centreLocal.dy - pointerLocal.dy;
+      _anchorCross = _horizontal ? centreLocal.dy : centreLocal.dx;
     } else {
-      _grabDelta = Offset.zero;
+      _grabMain = 0;
+      _anchorCross = 0;
     }
     // Start with the offset in full effect: the first frame of the drag puts the
     // pill exactly where it was grabbed, so nothing jumps.
@@ -375,10 +390,12 @@ class _BarContentState extends State<_BarContent>
   /// the workspaces land next to the launcher: crossing the middle of a zone's
   /// last pill flipped the answer into the following zone.
   void _updateTarget(Offset globalPosition) {
-    // Where the pill is, not where the cursor is: they differ until the pill has
-    // finished centring, and the drop should follow the pill the user sees.
-    final dragged = globalPosition + _currentGrabDelta;
-    final pointer = _horizontal ? dragged.dx : dragged.dy;
+    // Where the pill is along the bar, not where the cursor is: they differ until
+    // the pill has finished centring, and the drop should follow the pill the
+    // user is looking at.
+    final pointer =
+        (_horizontal ? globalPosition.dx : globalPosition.dy) +
+        _currentGrabMain;
     final zone = neoDropZoneAt(
       mainAxisPosition: pointer,
       zoneExtents: _dragZones,
@@ -447,7 +464,8 @@ class _BarContentState extends State<_BarContent>
       _dragRects = const <String, Rect>{};
       _dragZones = const <NeoZoneExtent>[];
       _dragChildren = const <String, Widget>{};
-      _grabDelta = Offset.zero;
+      _grabMain = 0;
+      _anchorCross = 0;
     });
   }
 
@@ -702,7 +720,7 @@ class _BarContentState extends State<_BarContent>
     final pointer = _pointerLocal;
     // Recomputed every build so the grab animation can move the pill without any
     // pointer input.
-    final feedbackCenter = pointer == null ? null : pointer + _currentGrabDelta;
+    final feedbackCenter = pointer == null ? null : _feedbackCentre(pointer);
     final feedback = _dragChildren[draggingId];
     return Stack(
       key: _stripKey,
