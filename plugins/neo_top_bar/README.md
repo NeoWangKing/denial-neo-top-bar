@@ -614,22 +614,76 @@ _grab       0 → 1，360ms + Motion.md3Emphasized
 
 面板高度上限 620、宽 380，内容可滚动；所有列表都有条数上限，扫描结果不会把面板撑爆。
 
-### 加一个新模块
+### 加一个新模块（这是标准做法）
 
-1. 在 `module_defaults.dart`：`NeoModuleIds` 加 id 常量，并写一个
-   `const NeoModuleDescriptor`（标签、说明、区、优先级、默认开关）。
-2. 在 `src/modules/` 新建文件实现 `NeoModule`：`descriptor` 直接返回那个常量，
-   再实现 `isAvailable` 和 `build`。
-3. 在 `module_registry.dart` 的 `_factories` 里加一行 `id: YourModule()`。
-4. 在 `test/config_test.dart` 的默认布局断言里决定它排在哪。
+按顺序做，缺一步都会在别处露馅：
 
-`id` 会被写进用户配置，**改名等于丢掉用户对这个模块的选择**。
+**1. 描述符**（`module_defaults.dart`）
+`NeoModuleIds` 加一个常量 + 一个 `const NeoModuleDescriptor`（label / description /
+zone / priority / defaultEnabled），并把它加进 `neoTopBarDefaultModules`。
+这一个文件是 id、区、优先级的**唯一**书写处，注册表、看板和测试都读它。
 
-外观一律走 `NeoCard` / `NeoCardButton`，不要自己写玻璃和圆角。动画遵守 Denial 的红线：
-不要在 `Opacity` / `FadeTransition` 上叠 `Transform.scale`（要同时淡入+缩放用
-`ShellFadeScale`），玻璃不要放进 fade 层，尺寸变化时改成乘 alpha。
-卡片会被拉伸到栏的整个厚度，所以模块内容要能接受"比自己需要更高"的绘制区
-（比如固定尺寸的小图标，外面套一层 `Center`）。
+**2. 实现**（`src/modules/your_module.dart`）
+```dart
+class YourModule implements NeoModule {
+  const YourModule();
+
+  @override
+  NeoModuleDescriptor get descriptor => yourModule;   // ← 必须返回你自己的那个常量
+  @override
+  bool isAvailable(NeoModuleContext context) => true;
+  @override
+  Widget build(BuildContext context, NeoModuleContext module) => ...;
+}
+```
+- 外观一律走 `NeoCard` / `NeoCardButton`，不要自己写玻璃和圆角。
+- **图标大小用 `module.glyphSize(fraction)`**，它按系统栏厚度算；
+  间距、内边距才可以用 `module.density`。**永远不要用 density 缩放图标。**
+- 没有数据可显示时返回 `SizedBox.shrink()`：布局会把「零宽」当成「不占位置也不占间隙」。
+- 面板走 `shellPopupControllerProvider.show(...)` + `NeoPopupSurface(... anchor: neoAnchorRectOf(context))`，
+  `barrierColor: Colors.transparent`；键盘默认可用，弹窗里可以直接放输入框。
+
+**3. 注册**（`module_registry.dart`）
+在 `_factories` 里加一行 `NeoModuleIds.yourModule: YourModule()`。
+`_resolve` 会检查「有没有实现」和「返回的描述符是不是自己那个」——抄改文件忘记换描述符，
+在这里会**直接抛错**，不会变成栏上两颗胶囊抢一个 id。
+
+**4. 自己的设置**（可选，但请照这个模板）
+```dart
+class YourModule implements NeoModule, NeoModuleSettings {
+  @override
+  Widget buildSettings(BuildContext context, NeoModuleSettingsScope scope) => ...;
+}
+```
+- 用 `NeoSettingRow` / `NeoSettingToggle`（`widgets/neo_setting_controls.dart`），
+  这样和面板里其它行的样式完全一致。
+- 选项从 `module.options` 读、从 `scope.setOption(key, value)` 写；**写 null 表示回到默认值**。
+- 选项的**解析必须是纯函数**（放进 `core/`，从 `neo_top_bar_logic.dart` 导出）：
+  文件是可以手改的，所以每个值都要有类型回退，未知/坏值整条丢掉而不是修一半。
+- 每个选项键都写成常量，别在两边各写一遍字符串。
+
+**5. 测试**
+- 默认布局断言（`test/config_test.dart`）：新模块的 id 要在 `NeoModuleIds` 清单里，
+  并决定它排在哪一区。
+- 你的纯逻辑：新建 `test/your_module_test.dart`，用
+  `"$DENIAL_PLUGIN_DART" --packages=.dart_tool/package_config.json test/...` 跑
+  （**不能用 `dart test`**，见上文）。
+- widget 层没有测试环境（没有 `flutter_tester`），所以**能抽成纯函数的规则一定要抽出来测**。
+
+**你不用做的**：多份实例、编号、增删、跨区移动、拖动排序、选项存储、
+面板里的卡片和展开区——这些都由实例模型和看板统一处理，模块只管「怎么画」和「有什么选项」。
+
+几条硬性约束，和上面并列：
+
+- `id` 会被写进用户配置，**改名等于丢掉用户对这个模块的选择**。
+- 动画遵守 Denial 的红线：不要在 `Opacity` / `FadeTransition` 上叠 `Transform.scale`
+  （要同时淡入+缩放用 `ShellFadeScale`），玻璃不要放进 fade 层，尺寸变化时改成乘 alpha。
+- 卡片会被拉伸到栏的整个厚度，所以模块内容要能接受"比自己需要更高"的绘制区
+  （比如固定尺寸的小图标，外面套一层 `Center`）。
+- **不 spawn 进程、不读配置文件、不直连 D-Bus**：数据一律走宿主 provider 或 `services.*`
+  （SDK 在音频那条路径上明确写了 must never spawn a CLI）。
+- **宿主给的顺序不能直接画**：它是 z-order 之类的实时顺序，每帧都可能变。
+  要显示成列表就先按稳定键排序（见启动器窗口图标、各应用音量两处）。
 
 ## 已知限制
 

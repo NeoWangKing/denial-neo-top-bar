@@ -45,13 +45,34 @@ abstract final class NeoTopBarModules {
   /// Throws if a descriptor has no implementation, because a missing pill is
   /// much harder to notice than a failed lookup.
   static final List<NeoModule> all = List<NeoModule>.unmodifiable(<NeoModule>[
-    for (final descriptor in neoTopBarDefaultModules)
-      _factories[descriptor.id] ??
-          (throw StateError(
-            'Module "${descriptor.id}" is declared in module_defaults.dart '
-            'but has no implementation in NeoTopBarModules._factories.',
-          )),
+    for (final descriptor in neoTopBarDefaultModules) _resolve(descriptor),
   ]);
+
+  /// The implementation for [descriptor], checked against its own metadata.
+  ///
+  /// Two mistakes a new module can make are caught here rather than showing up
+  /// as a strange bar: forgetting to register the implementation at all, and
+  /// copy-pasting a module file without changing which descriptor it returns.
+  /// The second one is the nastier of the two — everything still compiles, and
+  /// the bar keys pills by the descriptor the module reports, so two modules
+  /// would fight over one id.
+  static NeoModule _resolve(NeoModuleDescriptor descriptor) {
+    final module = _factories[descriptor.id];
+    if (module == null) {
+      throw StateError(
+        'Module "${descriptor.id}" is declared in module_defaults.dart '
+        'but has no implementation in NeoTopBarModules._factories.',
+      );
+    }
+    if (module.descriptor.id != descriptor.id) {
+      throw StateError(
+        'Module "${descriptor.id}" reports the descriptor '
+        '"${module.descriptor.id}"; a module must return its own descriptor '
+        'constant from module_defaults.dart.',
+      );
+    }
+    return module;
+  }
 
   static final Map<String, NeoModule> _byId = <String, NeoModule>{
     for (final module in all) module.descriptor.id: module,
