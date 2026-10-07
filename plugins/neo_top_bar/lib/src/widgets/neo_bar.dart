@@ -126,6 +126,15 @@ class _NeoTopBarState extends ConsumerState<NeoTopBar> {
 }
 
 /// One visible pill, in bar order.
+/// Eased motion for picking a pill up: it grows and slides until it is centred
+/// under the pointer.
+///
+/// Deliberately a duration and curve rather than a spring. The spring tokens
+/// settle in about 0.2s and are front-loaded, which reads as a snap followed by a
+/// slow creep; picking a pill up should feel deliberate and continuous.
+const Duration _pickUpDuration = Duration(milliseconds: 450);
+const Curve _pickUpCurve = Motion.md3Emphasized;
+
 class _PillSlot {
   const _PillSlot({required this.id, required this.zone, required this.key});
 
@@ -171,8 +180,13 @@ class _BarContentState extends State<_BarContent>
 
   String? _draggingId;
 
-  /// Centre of the drag feedback, in strip coordinates.
-  Offset? _feedbackCenter;
+  /// Pointer position in strip coordinates.
+  ///
+  /// The raw pointer, not the feedback's centre: the centre depends on the grab
+  /// animation, so it has to be recomputed on every frame the animation runs.
+  /// Storing the computed centre meant the pill only moved when a pointer event
+  /// arrived, which is why the centring slide never happened on its own.
+  Offset? _pointerLocal;
 
   /// Vector from the pointer to the dragged pill's centre, captured when the
   /// drag starts, along the bar's own axis.
@@ -330,11 +344,11 @@ class _BarContentState extends State<_BarContent>
     if (MediaQuery.disableAnimationsOf(context)) {
       _grab.value = 1;
     } else {
-      springTo(
+      MotionTelemetry.observe(
         _grab,
-        1,
-        spring: Motion.gentle,
-        telemetryLabel: 'neo_top_bar.pill_centre',
+        _grab.animateTo(1, duration: _pickUpDuration, curve: _pickUpCurve),
+        'neo_top_bar.pill_centre',
+        target: 1,
       );
     }
   }
@@ -348,8 +362,8 @@ class _BarContentState extends State<_BarContent>
 
   void _moveFeedback(Offset globalPosition) {
     final strip = _stripKey.currentContext?.findRenderObject();
-    _feedbackCenter = strip is RenderBox && strip.attached
-        ? strip.globalToLocal(globalPosition) + _currentGrabDelta
+    _pointerLocal = strip is RenderBox && strip.attached
+        ? strip.globalToLocal(globalPosition)
         : null;
   }
 
@@ -427,7 +441,7 @@ class _BarContentState extends State<_BarContent>
     _grab.stop();
     setState(() {
       _draggingId = null;
-      _feedbackCenter = null;
+      _pointerLocal = null;
       _targetBeforeId = null;
       _targetZone = null;
       _dragRects = const <String, Rect>{};
@@ -685,7 +699,10 @@ class _BarContentState extends State<_BarContent>
     );
 
     final feedbackSize = _dragRects[draggingId]?.size;
-    final feedbackCenter = _feedbackCenter;
+    final pointer = _pointerLocal;
+    // Recomputed every build so the grab animation can move the pill without any
+    // pointer input.
+    final feedbackCenter = pointer == null ? null : pointer + _currentGrabDelta;
     final feedback = _dragChildren[draggingId];
     return Stack(
       key: _stripKey,
@@ -813,6 +830,21 @@ class _DraggablePillState extends State<_DraggablePill>
     springTo(_scale, target, spring: spring, telemetryLabel: label);
   }
 
+  /// The pickup grow, eased over the same span as the centring slide so the two
+  /// read as one motion rather than two.
+  void _easeTo(double target, String label) {
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _scale.value = target;
+      return;
+    }
+    MotionTelemetry.observe(
+      _scale,
+      _scale.animateTo(target, duration: _pickUpDuration, curve: _pickUpCurve),
+      label,
+      target: target,
+    );
+  }
+
   void _handleDown(PointerDownEvent event) {
     if (event.buttons != kPrimaryButton) return;
     _pressed = true;
@@ -841,7 +873,7 @@ class _DraggablePillState extends State<_DraggablePill>
         // Long-press opens the arena's other side: a fast drag rejects it (the
         // 18px slop), so flicking across the bar never starts a reorder.
         onLongPressStart: (details) {
-          _growTo(_liftedScale, Motion.gentle, 'neo_top_bar.pill_lift');
+          _easeTo(_liftedScale, 'neo_top_bar.pill_lift');
           widget.onDragStart(widget.id, details.globalPosition);
         },
         onLongPressMoveUpdate: (details) =>
