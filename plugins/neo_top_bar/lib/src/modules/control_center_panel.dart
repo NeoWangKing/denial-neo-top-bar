@@ -700,17 +700,26 @@ class _TileGrid extends StatelessWidget {
       children: [
         for (var index = 0; index < tiles.length; index += 2) ...[
           if (index > 0) const SizedBox(height: 8),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(child: tiles[index]),
-              const SizedBox(width: 8),
-              Expanded(
-                child: index + 1 < tiles.length
-                    ? tiles[index + 1]
-                    : const SizedBox.shrink(),
-              ),
-            ],
+          // `IntrinsicHeight` is what makes both tiles in a row the same height
+          // without stretching them to the incoming constraint. A bare
+          // `CrossAxisAlignment.stretch` here asks the row to fill its cross
+          // axis, and inside the panel's vertical scroll view that axis is
+          // unbounded: the row takes an infinite height, everything after it in
+          // the column is pushed out of the viewport, and the card is left at
+          // its maximum height showing nothing below the sliders.
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(child: tiles[index]),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: index + 1 < tiles.length
+                      ? tiles[index + 1]
+                      : const SizedBox.shrink(),
+                ),
+              ],
+            ),
           ),
         ],
       ],
