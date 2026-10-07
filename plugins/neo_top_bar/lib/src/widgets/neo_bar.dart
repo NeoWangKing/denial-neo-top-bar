@@ -494,6 +494,14 @@ class _BarContentState extends State<_BarContent> {
     final indicatorMain = _indicatorMain;
     final theme = ShellTheme.of(context);
     return Listener(
+      // Without `opaque` the strip only counts as hit where a child is, because
+      // Listener defaults to HitTestBehavior.deferToChild. The settings card
+      // opens on right-clicks that deliberately miss every pill, so with the
+      // default it could never fire at all: over a pill it is skipped on purpose,
+      // and over the empty stretches between zones there is no child to hit.
+      // `opaque` makes the strip itself a hit target while still delivering
+      // events to its children, so the tray keeps its own right-click menus.
+      behavior: HitTestBehavior.opaque,
       onPointerDown: (event) {
         if (event.buttons != kSecondaryButton) return;
         // A raw Listener does not compete in the gesture arena, so anything the
