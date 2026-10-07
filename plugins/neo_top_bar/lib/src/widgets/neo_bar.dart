@@ -170,8 +170,17 @@ class _BarContentState extends State<_BarContent> {
 
   String? _draggingId;
 
-  /// Pointer position, in strip coordinates, of the drag feedback.
+  /// Centre of the drag feedback, in strip coordinates.
   Offset? _feedbackCenter;
+
+  /// Vector from the pointer to the dragged pill's centre, captured when the
+  /// drag starts.
+  ///
+  /// Keeping it is what stops the pill from jumping: without it the feedback's
+  /// centre is pinned to the pointer, so the moment a long press lands the pill
+  /// teleports out from under the finger. With it the pill stays exactly where
+  /// it was grabbed and simply follows.
+  Offset _grabDelta = Offset.zero;
 
   String? _targetBeforeId;
   NeoZone? _targetZone;
@@ -259,6 +268,15 @@ class _BarContentState extends State<_BarContent> {
       }
     }
     final moduleContext = _moduleContext;
+    final grabbed = rects[id];
+    final strip = _stripKey.currentContext?.findRenderObject();
+    if (strip is RenderBox && strip.attached && grabbed != null) {
+      final pointerLocal = strip.globalToLocal(globalPosition);
+      final centreLocal = strip.globalToLocal(grabbed.center);
+      _grabDelta = centreLocal - pointerLocal;
+    } else {
+      _grabDelta = Offset.zero;
+    }
     setState(() {
       _dragRects = rects;
       _dragZones = zones;
@@ -283,7 +301,7 @@ class _BarContentState extends State<_BarContent> {
   void _moveFeedback(Offset globalPosition) {
     final strip = _stripKey.currentContext?.findRenderObject();
     _feedbackCenter = strip is RenderBox && strip.attached
-        ? strip.globalToLocal(globalPosition)
+        ? strip.globalToLocal(globalPosition) + _grabDelta
         : null;
   }
 
@@ -295,7 +313,10 @@ class _BarContentState extends State<_BarContent> {
   /// the workspaces land next to the launcher: crossing the middle of a zone's
   /// last pill flipped the answer into the following zone.
   void _updateTarget(Offset globalPosition) {
-    final pointer = _horizontal ? globalPosition.dx : globalPosition.dy;
+    // Where the pill is, not where the cursor is: they differ by the grab
+    // offset, and the drop should follow the pill the user is looking at.
+    final dragged = globalPosition + _grabDelta;
+    final pointer = _horizontal ? dragged.dx : dragged.dy;
     final zone = neoDropZoneAt(
       mainAxisPosition: pointer,
       zoneExtents: _dragZones,
@@ -363,6 +384,7 @@ class _BarContentState extends State<_BarContent> {
       _dragRects = const <String, Rect>{};
       _dragZones = const <NeoZoneExtent>[];
       _dragChildren = const <String, Widget>{};
+      _grabDelta = Offset.zero;
     });
   }
 
