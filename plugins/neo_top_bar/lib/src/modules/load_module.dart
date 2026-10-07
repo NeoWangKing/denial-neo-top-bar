@@ -165,13 +165,19 @@ class NeoLoadMeter extends StatelessWidget {
                 ],
               ],
             )
-          // Vertical: the name tag is dropped. The pill is only as wide as the
-          // strip, and of the four things this meter carries the tag is the one
-          // that says least — the number and the line are the reading. What is
-          // left stacks top to bottom: percentage, temperature, history.
+          // Vertical: the same four things, stacked. The name tag **stays** — it
+          // is what tells CPU from NV0 from AMD0, and without it two meters read
+          // as two anonymous numbers. It costs one 11px line, and the tag is
+          // already the compact vendor form (`CPU`, `NV0`) that fits the pill's
+          // width.
           : Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(label, style: caption),
+                ),
+                const SizedBox(height: 1),
                 FittedBox(fit: BoxFit.scaleDown, child: percentage),
                 if (temperature != null) ...[
                   const SizedBox(height: 1),

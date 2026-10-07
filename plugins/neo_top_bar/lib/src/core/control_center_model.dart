@@ -415,11 +415,40 @@ const List<NeoPillGlyph> neoPillGlyphOrder = <NeoPillGlyph>[
   NeoPillGlyph.battery,
 ];
 
+/// Which battery mark a pill draws when the percentage is not shown.
+///
+/// Kept as a step rather than an icon so the choice is testable without Flutter:
+/// the widget maps each step to a Material icon, the way the volume glyph already
+/// maps [neoVolumeGlyphStep].
+enum NeoBatteryGlyphStep {
+  /// On mains power: the bolt carries the meaning, the level only fills it.
+  charging,
+  full,
+  high,
+  medium,
+  low,
+  empty,
+}
+
+/// The step for [level] (0-1) and [charging].
+///
+/// The thresholds are deliberately coarse — a pill glyph is not a gauge, and the
+/// battery pill next to it is the one that draws an exact level.
+NeoBatteryGlyphStep neoBatteryGlyphStep(double level, {bool charging = false}) {
+  if (charging) return NeoBatteryGlyphStep.charging;
+  if (level >= 0.9) return NeoBatteryGlyphStep.full;
+  if (level >= 0.6) return NeoBatteryGlyphStep.high;
+  if (level >= 0.3) return NeoBatteryGlyphStep.medium;
+  if (level > 0.0) return NeoBatteryGlyphStep.low;
+  return NeoBatteryGlyphStep.empty;
+}
+
 /// The control centre's stored settings, resolved against their defaults.
 class NeoControlCenterOptions {
   NeoControlCenterOptions({
     required Set<NeoPillGlyph> glyphs,
     required List<NeoPowerAction> powerActions,
+    this.batteryIcon = false,
   }) : glyphs = Set<NeoPillGlyph>.unmodifiable(glyphs),
        powerActions = List<NeoPowerAction>.unmodifiable(powerActions);
 
@@ -429,9 +458,16 @@ class NeoControlCenterOptions {
   /// Session buttons for the power row, in [neoPowerActionOrder] order.
   final List<NeoPowerAction> powerActions;
 
+  /// Whether the battery readout is drawn as a mark instead of `85%`.
+  ///
+  /// Off by default: the number is what the pill was for, and the mark is the
+  /// alternative a user asks for.
+  final bool batteryIcon;
+
   bool get isDefault =>
       glyphs.length == neoPillGlyphOrder.length &&
-      _sameActions(powerActions, neoPowerActionOrder);
+      _sameActions(powerActions, neoPowerActionOrder) &&
+      !batteryIcon;
 }
 
 /// The option key holding the selected [NeoPillGlyph]s.
@@ -439,6 +475,9 @@ const String neoControlCenterGlyphsKey = 'glyphs';
 
 /// The option key holding the selected [NeoPowerAction]s.
 const String neoControlCenterPowerKey = 'power';
+
+/// The option key holding whether the battery readout is a mark, not a number.
+const String neoControlCenterBatteryIconKey = 'batteryIcon';
 
 /// Resolves the stored settings, tolerating anything a hand-edited file holds.
 ///
@@ -482,7 +521,14 @@ NeoControlCenterOptions neoControlCenterOptions(Map<String, Object?> options) {
     for (final action in neoPowerActionOrder)
       if (selected.contains(action)) action,
   ];
-  return NeoControlCenterOptions(glyphs: glyphs, powerActions: actions);
+  return NeoControlCenterOptions(
+    glyphs: glyphs,
+    powerActions: actions,
+    batteryIcon: switch (options[neoControlCenterBatteryIconKey]) {
+      final bool value => value,
+      _ => false,
+    },
+  );
 }
 
 bool _sameActions(List<NeoPowerAction> left, List<NeoPowerAction> right) {

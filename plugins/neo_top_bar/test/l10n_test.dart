@@ -165,6 +165,11 @@ _samples = <String, ({String zh, String en})>{
     zh: zh.pillGlyphsAtLeastOne,
     en: en.pillGlyphsAtLeastOne,
   ),
+  'batteryGlyphIcon': (zh: zh.batteryGlyphIcon, en: en.batteryGlyphIcon),
+  'batteryGlyphIconHint': (
+    zh: zh.batteryGlyphIconHint,
+    en: en.batteryGlyphIconHint,
+  ),
   'powerButtons': (zh: zh.powerButtons, en: en.powerButtons),
   'powerHibernateHint': (zh: zh.powerHibernateHint, en: en.powerHibernateHint),
   'powerSuspendHint': (zh: zh.powerSuspendHint, en: en.powerSuspendHint),

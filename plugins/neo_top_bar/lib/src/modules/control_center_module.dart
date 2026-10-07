@@ -61,7 +61,7 @@ class ControlCenterModule implements NeoModule, NeoModuleSettings {
         NeoSettingGroup(
           title: s.pillGlyphs,
           children: [
-            for (final glyph in neoPillGlyphOrder)
+            for (final glyph in neoPillGlyphOrder) ...[
               NeoSettingRow(
                 label: s.pillGlyphLabel(glyph),
                 description: s.pillGlyphDescription(glyph),
@@ -85,6 +85,25 @@ class ControlCenterModule implements NeoModule, NeoModuleSettings {
                   },
                 ),
               ),
+              // The battery's own choice lives under the battery row, and only
+              // while that row is on: it is about how the readout is drawn, not
+              // about whether it exists, so it would be noise next to a disabled
+              // glyph.
+              if (glyph == NeoPillGlyph.battery && glyphs.contains(glyph))
+                NeoSettingRow(
+                  label: s.batteryGlyphIcon,
+                  description: s.batteryGlyphIconHint,
+                  child: NeoSettingToggle(
+                    value: options.batteryIcon,
+                    // Back to the default writes null, so an untouched file
+                    // stays empty.
+                    onChanged: (value) => scope.setOption(
+                      neoControlCenterBatteryIconKey,
+                      value ? true : null,
+                    ),
+                  ),
+                ),
+            ],
           ],
         ),
         const SizedBox(height: 14),
@@ -162,6 +181,21 @@ String _powerDescription(NeoPowerAction action, NeoStrings s) =>
       NeoPowerAction.powerOff => s.powerShutdownHint,
     };
 
+/// The Material mark for a battery step.
+///
+/// The step itself is decided in the pure layer ([neoBatteryGlyphStep]), so the
+/// thresholds are tested without Flutter; only the picture lives here. The bar
+/// icons are used rather than the older `battery_std` shape because they read at
+/// a glyph's size, where a fill level has to be obvious at a glance.
+IconData neoBatteryGlyphIcon(NeoBatteryGlyphStep step) => switch (step) {
+  NeoBatteryGlyphStep.charging => Icons.battery_charging_full,
+  NeoBatteryGlyphStep.full => Icons.battery_full,
+  NeoBatteryGlyphStep.high => Icons.battery_5_bar,
+  NeoBatteryGlyphStep.medium => Icons.battery_3_bar,
+  NeoBatteryGlyphStep.low => Icons.battery_1_bar,
+  NeoBatteryGlyphStep.empty => Icons.battery_alert,
+};
+
 class _ControlCenterContent extends ConsumerWidget {
   const _ControlCenterContent({required this.module});
 
@@ -181,8 +215,10 @@ class _ControlCenterContent extends ConsumerWidget {
     // drawn inside them. Only the gaps follow the density.
     final size = module.glyphSize(0.36);
     final gap = 7 * module.density;
-    // Which readouts the user kept, resolved from the module's own settings.
-    final selected = neoControlCenterOptions(module.options).glyphs;
+    // Which readouts the user kept, and how the battery is drawn, resolved from
+    // the module's own settings.
+    final options = neoControlCenterOptions(module.options);
+    final selected = options.glyphs;
 
     final glyph = theme.colors.textPrimary;
     final dim = theme.colors.glyphInactive;
@@ -257,8 +293,17 @@ class _ControlCenterContent extends ConsumerWidget {
       if (selected.contains(NeoPillGlyph.battery))
         if (battery.capacity case final capacity?)
           _StatusGlyph(
-            icon: null,
-            label: '$capacity%',
+            // The user chooses between the number and a mark; the mark follows
+            // the level, so a nearly empty battery still reads as one.
+            icon: options.batteryIcon
+                ? neoBatteryGlyphIcon(
+                    neoBatteryGlyphStep(
+                      capacity / 100,
+                      charging: battery.charging,
+                    ),
+                  )
+                : null,
+            label: options.batteryIcon ? null : '$capacity%',
             size: size,
             color: battery.charging ? theme.accent : glyph,
             tooltip: s.batteryTooltip(capacity),

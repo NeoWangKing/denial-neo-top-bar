@@ -2,21 +2,9 @@ import 'package:neo_top_bar/neo_top_bar_logic.dart';
 import 'package:test/test.dart';
 
 const _descriptors = <NeoModuleDescriptor>[
-  NeoModuleDescriptor(
-    id: 'tray',
-    zone: NeoZone.start,
-    priority: 10,
-  ),
-  NeoModuleDescriptor(
-    id: 'workspaces',
-    zone: NeoZone.center,
-    priority: 10,
-  ),
-  NeoModuleDescriptor(
-    id: 'clock',
-    zone: NeoZone.end,
-    priority: 10,
-  ),
+  NeoModuleDescriptor(id: 'tray', zone: NeoZone.start, priority: 10),
+  NeoModuleDescriptor(id: 'workspaces', zone: NeoZone.center, priority: 10),
+  NeoModuleDescriptor(id: 'clock', zone: NeoZone.end, priority: 10),
   NeoModuleDescriptor(
     id: 'cpu',
     zone: NeoZone.end,
@@ -174,11 +162,7 @@ void main() {
     test('falls back to priority then id for unlisted modules', () {
       final descriptors = <NeoModuleDescriptor>[
         ..._descriptors,
-        const NeoModuleDescriptor(
-          id: 'aaa',
-          zone: NeoZone.start,
-          priority: 10,
-        ),
+        const NeoModuleDescriptor(id: 'aaa', zone: NeoZone.start, priority: 10),
       ];
       final placements = resolvePlacements(
         descriptors: descriptors,

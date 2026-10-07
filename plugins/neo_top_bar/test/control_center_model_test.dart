@@ -472,6 +472,37 @@ void main() {
       expect(options.powerActions, neoPowerActionOrder);
     });
 
+    test('the battery draws its percentage unless the mark is asked for', () {
+      expect(
+        neoControlCenterOptions(const <String, Object?>{}).batteryIcon,
+        isFalse,
+      );
+      expect(
+        neoControlCenterOptions(<String, Object?>{'batteryIcon': true})
+            .batteryIcon,
+        isTrue,
+      );
+      // A hand-edited file can hold anything; a non-bool is not a choice.
+      expect(
+        neoControlCenterOptions(<String, Object?>{'batteryIcon': 'yes'})
+            .batteryIcon,
+        isFalse,
+      );
+    });
+
+    test('asking for the battery mark is a customisation, not the default', () {
+      expect(
+        neoControlCenterOptions(<String, Object?>{'batteryIcon': true})
+            .isDefault,
+        isFalse,
+      );
+      expect(
+        neoControlCenterOptions(<String, Object?>{'batteryIcon': false})
+            .isDefault,
+        isTrue,
+      );
+    });
+
     test('an emptied power row is a choice, an emptied pill is not', () {
       expect(
         neoControlCenterOptions(<String, Object?>{'power': <String>[]})
@@ -515,6 +546,34 @@ void main() {
         isFalse,
       );
     });
+  });
+
+  group('battery glyph', () {
+    test('the mark follows the level, coarsely', () {
+      expect(neoBatteryGlyphStep(1.0), NeoBatteryGlyphStep.full);
+      expect(neoBatteryGlyphStep(0.92), NeoBatteryGlyphStep.full);
+      expect(neoBatteryGlyphStep(0.9), NeoBatteryGlyphStep.full);
+      expect(neoBatteryGlyphStep(0.61), NeoBatteryGlyphStep.high);
+      expect(neoBatteryGlyphStep(0.31), NeoBatteryGlyphStep.medium);
+      expect(neoBatteryGlyphStep(0.05), NeoBatteryGlyphStep.low);
+      expect(neoBatteryGlyphStep(0.0), NeoBatteryGlyphStep.empty);
+    });
+
+    test(
+      'charging wins over the level, and out-of-range values are clamped',
+      () {
+        expect(
+          neoBatteryGlyphStep(0.0, charging: true),
+          NeoBatteryGlyphStep.charging,
+        );
+        expect(
+          neoBatteryGlyphStep(1.7, charging: true),
+          NeoBatteryGlyphStep.charging,
+        );
+        expect(neoBatteryGlyphStep(2.0), NeoBatteryGlyphStep.full);
+        expect(neoBatteryGlyphStep(-3.0), NeoBatteryGlyphStep.empty);
+      },
+    );
   });
 
   group('labels', () {

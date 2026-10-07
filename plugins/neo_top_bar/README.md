@@ -565,7 +565,7 @@ _grab       0 → 1，360ms + Motion.md3Emphasized
 | 组件 | 横栏 | 竖栏 |
 |---|---|---|
 | 时钟 | 日期 + 时间一行 | **只留时间**（`20:52` 已接近 33px 可用宽度的极限），日期点开日历看 |
-| CPU / GPU | 名字 + 折线 + 百分比 + 温度一行 | 百分比 / 温度 / 折线自上而下，**去掉「CPU」「GPU0」名字**，折线画窄一点（28px） |
+| CPU / GPU | 名字 + 折线 + 百分比 + 温度一行 | 名字 / 百分比 / 温度 / 折线自上而下，折线画窄一点（28px）。**名字必须留着**：GPU 的 label 本来就是紧凑厂商名（`AMD`、`NV0`），去掉之后 CPU 和 GPU 只是两个没名字的数字 |
 | 媒体 | 标题 + 上一首/播放/下一首一行 | **只留三个按钮**（标题在这么窄的胶囊里只剩省略号） |
 | 电池 | 横向电量条 + 百分比 | 电量条**转 90°**（`RotatedBox`，矢量绘制不会糊）+ 百分比 |
 | 启动器 | 图标 + 窗口图标一行 | 图标 / 分隔线 / 窗口图标自上而下；竖栏最多叠 **5** 个（`kMaxWindowIconsVertical`），其余记在 `+N` |
@@ -643,11 +643,17 @@ _grab       0 → 1，360ms + Motion.md3Emphasized
 | 深浅模式 | `shellSettingsProvider` |
 | 锁屏 / 睡眠 / 休眠 / 注销 / 重启 / 关机 | `sessionPowerProvider` |
 
-**一条都不 spawn 进程、不读配置文件、不直连 D-Bus。** SDK 明确写了音频这条路
-「The embedded Dart runtime must never spawn a CLI for this path」，而且
+**一条都不 spawn 进程、不读配置文件、不直连 D-Bus。** SDK 明确写了音频这条路「The embedded Dart runtime must never spawn a CLI for this path」，而且
 `wpctl` / `brightnessctl` / `nmcli` 那种做法会绕开宿主的权限与状态管理。
 
 几个具体决定：
+
+- **电量的样子可以选。** 胶囊上的电量读数默认直接写 `85%`；把设置里「电量」那一行**下面**
+  的 **用图标代替百分比** 打开，就改成画电量图标。图标跟着电量走：充电优先，然后
+  ≥90% / ≥60% / ≥30% / 有电 / 空，映射到 `battery_charging_full`、`battery_full`、
+  `battery_5_bar`、`battery_3_bar`、`battery_1_bar`、`battery_alert`。**分级是纯函数**
+  `neoBatteryGlyphStep`（有单测），图标本身留在 widget 层——这样阈值不靠眼睛验。
+  这个开关只在「电量」读数开着的时候出现：读数都关了，问它长什么样没有意义。
 
 - **静音 = 把音量设成 0。** 音频桥只暴露「设置百分比」一个写接口，没有 mute 调用，
   所以取消静音必须自己记住之前的音量（`neoVolumeAfterMuteToggle`，纯函数 + 单测）。

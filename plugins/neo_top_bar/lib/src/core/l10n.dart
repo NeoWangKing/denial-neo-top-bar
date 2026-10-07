@@ -415,6 +415,11 @@ class NeoStrings {
   String get pillGlyphs => _t('胶囊上显示', 'Shown on the pill');
   String get pillGlyphsAtLeastOne =>
       _t('至少留一个，否则胶囊会是空白', 'Keep at least one, or the pill is blank');
+  String get batteryGlyphIcon => _t('用图标代替百分比', 'Icon instead of a percentage');
+  String get batteryGlyphIconHint => _t(
+    '关掉就还是现在这样：胶囊上直接写 85%',
+    'Off keeps what the pill does now: it writes 85%',
+  );
   String get powerButtons => _t('电源按钮', 'Power buttons');
   String get powerHibernateHint =>
       _t('休眠，默认不在这一行里', 'Hibernate; off this row by default');
