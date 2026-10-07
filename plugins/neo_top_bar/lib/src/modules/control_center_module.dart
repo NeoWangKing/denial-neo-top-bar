@@ -171,7 +171,10 @@ class _ControlCenterContent extends ConsumerWidget {
     final bluetooth = ref.watch(bluetoothProvider);
     final battery = ref.watch(module.services.battery);
     final wired = ref.watch(neoWiredLinkProvider).value ?? false;
-    final size = 16 * module.density.clamp(0.85, 1.15).toDouble();
+    // Glyph sizes come from the bar's thickness, so switching between compact
+    // and comfortable spacing moves the pills apart without shrinking what is
+    // drawn inside them. Only the gaps follow the density.
+    final size = module.glyphSize(0.36);
     final gap = 7 * module.density;
     // Which readouts the user kept, resolved from the module's own settings.
     final selected = neoControlCenterOptions(module.options).glyphs;

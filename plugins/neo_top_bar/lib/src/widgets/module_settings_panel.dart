@@ -130,8 +130,8 @@ class NeoModuleSettingsPanel extends StatelessWidget {
                 padding: const EdgeInsets.only(top: 4, bottom: 12),
                 child: Text(
                   '拖动卡片调整同一区内的顺序（越靠上，在横栏上越靠左）；'
-                  '点卡片里的「设置」展开它自己的选项；'
-                  '每区底部的「添加组件」把组件放到那一段。',
+                  '点卡片里的箭头展开它自己的选项；'
+                  '「添加组件」可以把任何组件放进这一段，同一个组件想加几个就加几个。',
                   style: theme.text.systemBarCaption.copyWith(
                     color: theme.colors.textTertiary,
                     fontSize: 12,
@@ -262,7 +262,7 @@ class _ZoneSection extends StatelessWidget {
   /// The id a drop at [newIndex] should end up in front of, as the configuration
   /// expresses placement.
   void _reorder(int oldIndex, int newIndex) {
-    final ids = <String>[for (final row in rows) row.descriptor.id];
+    final ids = <String>[for (final row in rows) row.id];
     state.moveToSlot(
       ids[oldIndex],
       targetZone: zone,
@@ -312,7 +312,10 @@ class _ZoneSection extends StatelessWidget {
           ),
         _AddModuleButton(
           zone: zone,
-          candidates: neoAddCandidates(placements: placements, zone: zone),
+          candidates: neoAddCandidates(
+            descriptors: descriptors,
+            placements: placements,
+          ),
           state: state,
           descriptors: descriptors,
         ),
@@ -439,7 +442,9 @@ class _ModuleCardState extends State<_ModuleCard> {
                         children: [
                           Expanded(
                             child: Text(
-                              descriptor.label,
+                              // The number is what tells two copies of the same
+                              // module apart on the board and in the bar.
+                              widget.placement.label,
                               style: theme.text.systemBarValue.copyWith(
                                 fontSize: 14,
                               ),
@@ -452,9 +457,9 @@ class _ModuleCardState extends State<_ModuleCard> {
                           // The control is removal, and re-adding goes through
                           // the zone's add button.
                           _RemoveButton(
-                            onPressed: () => widget.state.setEnabled(
-                              descriptor.id,
-                              enabled: false,
+                            onPressed: () => widget.state.removeInstance(
+                              widget.placement.id,
+                              descriptors: NeoTopBarModules.descriptors,
                             ),
                           ),
                         ],
@@ -533,7 +538,7 @@ class _ExpandedSettings extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              '「${placement.descriptor.label}」设置',
+              '「${placement.label}」设置',
               style: theme.text.systemBarCaption.copyWith(
                 fontSize: 12,
                 color: theme.colors.textSecondary,
@@ -589,17 +594,6 @@ class _AddModuleButtonState extends State<_AddModuleButton> {
   @override
   Widget build(BuildContext context) {
     final theme = ShellTheme.of(context);
-    if (widget.candidates.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: Text(
-          '所有组件都在这一段里了。',
-          style: theme.text.systemBarCaption.copyWith(
-            color: theme.colors.textTertiary,
-          ),
-        ),
-      );
-    }
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Column(
@@ -631,7 +625,7 @@ class _AddModuleButtonState extends State<_AddModuleButton> {
                         candidate: candidate,
                         onPressed: () {
                           setState(() => _open = false);
-                          widget.state.addToZone(
+                          widget.state.addInstance(
                             candidate.descriptor.id,
                             zone: widget.zone,
                             descriptors: widget.descriptors,
@@ -656,20 +650,14 @@ class _AddCandidateRow extends StatelessWidget {
   final NeoAddCandidate candidate;
   final VoidCallback onPressed;
 
-  static const Map<NeoZone, String> _zoneLabels = <NeoZone, String>{
-    NeoZone.start: '左',
-    NeoZone.center: '中',
-    NeoZone.end: '右',
-  };
-
   @override
   Widget build(BuildContext context) {
     final theme = ShellTheme.of(context);
-    final from = candidate.currentZone;
-    final hint = switch (candidate.effect) {
-      NeoAddEffect.add => '添加',
-      NeoAddEffect.move => '从${from == null ? '别处' : _zoneLabels[from]}移过来',
-    };
+    // The first copy is just "添加"; the rest say which number they will be, so
+    // the card that follows is predictable.
+    final hint = candidate.existing == 0
+        ? '添加'
+        : '添加第 ${candidate.existing + 1} 个';
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
@@ -709,6 +697,10 @@ class _AddCandidateRow extends StatelessWidget {
 /// inside it — next to the label — was the thing that looked wrong. The chevron
 /// stays accent-tinted when the module has settings to open, so the card still
 /// says where to look.
+/// Both trailing controls are drawn in this box so their icons sit on one
+/// vertical axis down the right edge of every card.
+const double _cardControlSize = 28;
+
 class _ExpanderButton extends StatelessWidget {
   const _ExpanderButton({
     required this.expanded,
@@ -734,12 +726,14 @@ class _ExpanderButton extends StatelessWidget {
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: onPressed,
-        child: Padding(
-          padding: const EdgeInsets.all(6),
-          child: Icon(
-            expanded ? Icons.expand_less : Icons.expand_more,
-            size: 20,
-            color: color,
+        child: SizedBox.square(
+          dimension: _cardControlSize,
+          child: Center(
+            child: Icon(
+              expanded ? Icons.expand_less : Icons.expand_more,
+              size: 20,
+              color: color,
+            ),
           ),
         ),
       ),
@@ -793,14 +787,16 @@ class _RemoveButtonState extends State<_RemoveButton> {
                       : Colors.transparent,
                   borderRadius: theme.borderRadius(7),
                 ),
-                child: Padding(
-                  padding: const EdgeInsets.all(5),
-                  child: Icon(
-                    Icons.close,
-                    size: 17,
-                    color: _hovered
-                        ? theme.colors.performanceBad
-                        : theme.colors.textTertiary,
+                child: SizedBox.square(
+                  dimension: _cardControlSize,
+                  child: Center(
+                    child: Icon(
+                      Icons.close,
+                      size: 17,
+                      color: _hovered
+                          ? theme.colors.performanceBad
+                          : theme.colors.textTertiary,
+                    ),
                   ),
                 ),
               ),
@@ -893,7 +889,16 @@ class _DensityRow extends StatelessWidget {
   }
 }
 
-/// A small segmented control, used for the bar-wide spacing.
+/// A row of mutually exclusive choices, drawn the way Denial's own settings draw
+/// them: one bordered chip per choice, spaced apart, the selected one filled with
+/// a translucent accent and outlined in the accent colour.
+///
+/// The earlier version was a single plate with an accent-coloured segment inside
+/// it. Two rounded rectangles sharing an edge anti-alias against each other, so
+/// the selected segment's corners came out ragged — and it was a different
+/// control from every other one in the shell. Separate chips have one rounded
+/// rectangle each, which is both correct to rasterise and what the rest of
+/// Denial looks like.
 class _Segmented<T> extends StatelessWidget {
   const _Segmented({
     required this.values,
@@ -906,26 +911,23 @@ class _Segmented<T> extends StatelessWidget {
   final ValueChanged<T> onSelected;
 
   @override
-  Widget build(BuildContext context) {
-    final theme = ShellTheme.of(context);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: theme.colors.tileOff,
-        borderRadius: BorderRadius.circular(theme.chipRadius),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (final entry in values.entries)
-            _SegmentButton(
-              label: entry.value,
-              selected: entry.key == selected,
-              onPressed: () => onSelected(entry.key),
-            ),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Semantics(
+    explicitChildNodes: true,
+    child: Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      alignment: WrapAlignment.end,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        for (final entry in values.entries)
+          _SegmentButton(
+            label: entry.value,
+            selected: entry.key == selected,
+            onPressed: () => onSelected(entry.key),
+          ),
+      ],
+    ),
+  );
 }
 
 class _SegmentButton extends StatelessWidget {
@@ -943,33 +945,33 @@ class _SegmentButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = ShellTheme.of(context);
     return Semantics(
-      button: true,
-      selected: selected,
-      label: label,
+      checked: selected,
+      inMutuallyExclusiveGroup: true,
       child: ExcludeSemantics(
         child: MouseRegion(
           cursor: SystemMouseCursors.click,
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: onPressed,
-            child: DecoratedBox(
+            child: AnimatedContainer(
+              duration: Motion.cardSettle,
+              curve: Motion.standard,
+              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
               decoration: BoxDecoration(
-                color: selected ? theme.accent : Colors.transparent,
-                borderRadius: BorderRadius.circular(theme.chipRadius),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
+                color: selected
+                    ? theme.accent.withValues(alpha: 0.22)
+                    : theme.colors.tileOff,
+                borderRadius: theme.borderRadius(theme.chipRadius),
+                border: Border.all(
+                  color: selected ? theme.accent : theme.colors.hairline,
                 ),
-                child: Text(
-                  label,
-                  style: theme.text.systemBarCaption.copyWith(
-                    fontSize: 12,
-                    color: selected
-                        ? theme.accentPalette.onPrimary
-                        : theme.colors.textSecondary,
-                  ),
+              ),
+              child: Text(
+                label,
+                style: theme.text.systemBarCaption.copyWith(
+                  fontSize: 12.5,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                  color: selected ? theme.accent : theme.colors.textSecondary,
                 ),
               ),
             ),

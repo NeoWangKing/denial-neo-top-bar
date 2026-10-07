@@ -146,16 +146,20 @@ class _LauncherContentState extends ConsumerState<_LauncherContent> {
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          // Sized from the strip's cross extent, which the user sets in Denial's
-          // settings, rather than from a fixed pixel value.
-          final cross = module.horizontal
-              ? constraints.maxHeight
-              : constraints.maxWidth;
-          final available = cross.isFinite && cross > 0 ? cross : 22.0;
-          double iconSize(double fraction) =>
-              (available * fraction).clamp(_minIcon, _maxIcon);
-          final logoSize = iconSize(_logoFraction);
-          final windowSize = iconSize(_windowFraction);
+          // Sized from the pill's height — that is, from the thickness the user
+          // set in Denial's settings — rather than from this plugin's spacing
+          // scale or from a fixed pixel value. One helper shared with every other
+          // module, so a bar's glyphs all grow together.
+          final logoSize = module.glyphSize(
+            _logoFraction,
+            min: _minIcon,
+            max: _maxIcon,
+          );
+          final windowSize = module.glyphSize(
+            _windowFraction,
+            min: _minIcon,
+            max: _maxIcon,
+          );
 
           return Row(
             mainAxisSize: MainAxisSize.min,

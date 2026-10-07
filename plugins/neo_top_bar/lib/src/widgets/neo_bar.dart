@@ -193,6 +193,13 @@ class _BarContentState extends State<_BarContent>
 
   final Map<String, GlobalKey> _pillKeys = <String, GlobalKey>{};
 
+  /// Height of a pill, measured in the frame being built.
+  ///
+  /// Read from the strip's own constraints rather than from Denial's settings, so
+  /// the icons follow what is actually on screen — including the edge padding
+  /// this bar applies — and not a number that could disagree with it.
+  double _pillCrossExtent = 40;
+
   /// Measured size of each visible pill along the bar's main axis.
   ///
   /// Explicit positioning has to know a pill's size before placing it, and that
@@ -297,6 +304,10 @@ class _BarContentState extends State<_BarContent>
     side: widget.side,
     accent: widget.accent,
     density: widget.state.config.density.scale,
+    // Icon sizes follow the strip's own thickness, so a module never has to
+    // guess it from a `LayoutBuilder` that may or may not be inside the card's
+    // padding.
+    crossExtent: _pillCrossExtent,
     options: id == null
         ? const <String, Object?>{}
         : widget.state.config.optionsOf(id),
@@ -314,8 +325,10 @@ class _BarContentState extends State<_BarContent>
   Map<String, Widget> _moduleCache = const <String, Widget>{};
   int? _moduleCacheKey;
 
-  Widget _module(BuildContext context, String id) {
-    final moduleContext = _moduleContextFor(id);
+  /// The widget for one *instance*: [instanceId] is what it is keyed and cached
+  /// by, [moduleId] decides which implementation draws it.
+  Widget _module(BuildContext context, String instanceId, String moduleId) {
+    final moduleContext = _moduleContextFor(instanceId);
     final key = Object.hash(
       moduleContext.services,
       moduleContext.monitorId,
@@ -329,14 +342,14 @@ class _BarContentState extends State<_BarContent>
       _moduleCache = <String, Widget>{};
     }
     return _moduleCache.putIfAbsent(
-      id,
-      () => NeoTopBarModules.byId(id)!.build(context, moduleContext),
+      instanceId,
+      () => NeoTopBarModules.byId(moduleId)!.build(context, moduleContext),
     );
   }
 
   bool _isVisible(NeoModulePlacement placement, NeoModuleContext context) {
     if (!placement.enabled) return false;
-    final module = NeoTopBarModules.byId(placement.descriptor.id);
+    final module = NeoTopBarModules.byId(placement.moduleId);
     return module != null && module.isAvailable(context);
   }
 
@@ -558,6 +571,11 @@ class _BarContentState extends State<_BarContent>
       child: LayoutBuilder(
         builder: (context, constraints) {
           final size = constraints.biggest;
+          final measuredCross =
+              (horizontal ? size.height : size.width) - _crossPadding * 2;
+          _pillCrossExtent = measuredCross > 0
+              ? measuredCross
+              : _pillCrossExtent;
           // While dragging, the order on screen is a preview of the drop; the
           // same pure function that will be persisted produces it.
           final draggingId = _draggingId;
@@ -566,7 +584,7 @@ class _BarContentState extends State<_BarContent>
               ? moveModuleToSlot(
                   config: widget.state.config,
                   descriptors: descriptors,
-                  moduleId: draggingId,
+                  instanceId: draggingId,
                   targetZone: targetZone,
                   beforeId: _targetBeforeId,
                 )
@@ -595,6 +613,7 @@ class _BarContentState extends State<_BarContent>
               theme: theme,
               size: size,
               boxes: boxes,
+              visible: visible,
               density: density,
             );
           }
@@ -618,10 +637,11 @@ class _BarContentState extends State<_BarContent>
   List<NeoPillBox>? _pillBoxes(List<NeoModulePlacement> visible) {
     final boxes = <NeoPillBox>[];
     for (final placement in visible) {
-      final id = placement.descriptor.id;
-      final extent = _pillExtents[id];
+      final extent = _pillExtents[placement.id];
       if (extent == null) return null;
-      boxes.add(NeoPillBox(id: id, zone: placement.zone, extent: extent));
+      boxes.add(
+        NeoPillBox(id: placement.id, zone: placement.zone, extent: extent),
+      );
     }
     return boxes;
   }
@@ -687,6 +707,7 @@ class _BarContentState extends State<_BarContent>
     required ShellThemeData theme,
     required Size size,
     required List<NeoPillBox> boxes,
+    required List<NeoModulePlacement> visible,
     required double density,
   }) {
     final horizontal = _horizontal;
@@ -710,12 +731,12 @@ class _BarContentState extends State<_BarContent>
     // under the pointer sliding beneath its neighbours is exactly what was
     // reported.
     final lifted = <Widget>[];
-    for (final box in boxes) {
-      final id = box.id;
+    for (final placement in visible) {
+      final id = placement.id;
       final at = placed[id];
       if (at == null) continue;
       final key = _keyFor(id);
-      slots.add(_PillSlot(id: id, zone: box.zone, key: key));
+      slots.add(_PillSlot(id: id, zone: placement.zone, key: key));
 
       final held = id == draggingId && pointer != null;
       final heldCentre = held ? _feedbackCentre(pointer) : null;
@@ -752,7 +773,7 @@ class _BarContentState extends State<_BarContent>
             onDragUpdate: _updateDrag,
             onDragEnd: _endDrag,
             onDragCancel: _clearDrag,
-            child: _module(context, id),
+            child: _module(context, id, placement.moduleId),
           ),
         ),
       );
@@ -797,7 +818,7 @@ class _BarContentState extends State<_BarContent>
     final zones = <NeoZone, List<Widget>>{};
     final slots = <_PillSlot>[];
     for (final placement in visible) {
-      final id = placement.descriptor.id;
+      final id = placement.id;
       final key = _keyFor(id);
       slots.add(_PillSlot(id: id, zone: placement.zone, key: key));
       (zones[placement.zone] ??= <Widget>[]).add(
@@ -810,7 +831,7 @@ class _BarContentState extends State<_BarContent>
             onDragUpdate: _updateDrag,
             onDragEnd: _endDrag,
             onDragCancel: _clearDrag,
-            child: _module(context, id),
+            child: _module(context, id, placement.moduleId),
           ),
         ),
       );

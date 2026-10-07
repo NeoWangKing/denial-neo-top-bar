@@ -19,57 +19,46 @@ library;
 import 'config.dart';
 import 'module_descriptor.dart';
 
-/// What dropping a module on a zone would do to it.
-enum NeoAddEffect {
-  /// The module is switched off and becomes visible here.
-  add,
-
-  /// The module is visible on another zone and moves here.
-  move,
-}
-
-/// One entry of a zone's add list.
+/// One entry of a zone's add list: a module kind, and how many copies of it are
+/// already on the bar.
 class NeoAddCandidate {
-  const NeoAddCandidate({
-    required this.descriptor,
-    required this.effect,
-    required this.currentZone,
-  });
+  const NeoAddCandidate({required this.descriptor, required this.existing});
 
   final NeoModuleDescriptor descriptor;
 
-  final NeoAddEffect effect;
-
-  /// The zone the module is on right now; null when it is switched off.
-  final NeoZone? currentZone;
+  /// Copies of this module that are currently on the bar, anywhere.
+  ///
+  /// The list offers every kind regardless — the point of instances is that any
+  /// module can be added any number of times, to any zone — so the count is what
+  /// tells the user what they are about to create.
+  final int existing;
 
   @override
-  String toString() =>
-      'NeoAddCandidate(${descriptor.id}, ${effect.name}, $currentZone)';
+  String toString() => 'NeoAddCandidate(${descriptor.id}, existing: $existing)';
 }
 
-/// What the add list for [zone] should offer.
+/// What the add list should offer, in descriptor order.
 ///
-/// Modules already enabled on [zone] are left out: offering to add what is
-/// already on screen is how a menu ends up with dead entries. Modules on another
-/// zone are offered as a move, and switched-off modules as an add, in descriptor
-/// order so the list does not depend on what the user has dragged where.
+/// Deliberately unfiltered: a module already on the bar is still offered,
+/// because a second copy is a legitimate thing to want (two clocks, one per
+/// time zone, say). The count is carried so the button can say which copy is
+/// about to be created.
 List<NeoAddCandidate> neoAddCandidates({
+  required Iterable<NeoModuleDescriptor> descriptors,
   required Iterable<NeoModulePlacement> placements,
-  required NeoZone zone,
 }) {
-  final candidates = <NeoAddCandidate>[];
+  final counts = <String, int>{};
   for (final placement in placements) {
-    if (placement.enabled && placement.zone == zone) continue;
-    candidates.add(
-      NeoAddCandidate(
-        descriptor: placement.descriptor,
-        effect: placement.enabled ? NeoAddEffect.move : NeoAddEffect.add,
-        currentZone: placement.enabled ? placement.zone : null,
-      ),
-    );
+    if (!placement.enabled) continue;
+    counts[placement.moduleId] = (counts[placement.moduleId] ?? 0) + 1;
   }
-  return List<NeoAddCandidate>.unmodifiable(candidates);
+  return List<NeoAddCandidate>.unmodifiable(<NeoAddCandidate>[
+    for (final descriptor in descriptors)
+      NeoAddCandidate(
+        descriptor: descriptor,
+        existing: counts[descriptor.id] ?? 0,
+      ),
+  ]);
 }
 
 /// The `beforeId` for a drop that landed at [newIndex], given the zone's ids in

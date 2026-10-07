@@ -23,7 +23,7 @@ export 'src/core/config.dart'
     show
         NeoDensity,
         NeoModulePlacement,
-        NeoModulePreference,
+        NeoModuleInstancePreference,
         NeoTopBarConfig,
         resolvePlacements;
 export 'src/core/module_defaults.dart'

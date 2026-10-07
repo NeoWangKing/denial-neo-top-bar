@@ -36,6 +36,18 @@ const _descriptors = <NeoModuleDescriptor>[
 List<String> _ids(List<NeoModulePlacement> placements) =>
     placements.map((placement) => placement.descriptor.id).toList();
 
+/// The first instance of [descriptor], which is what a bare module id means.
+///
+/// Resolved through the same function the bar uses, so a test that asks "is this
+/// module on" gets the answer the bar would get.
+NeoModulePlacement _firstInstance(
+  NeoTopBarConfig config,
+  NeoModuleDescriptor descriptor,
+) => resolvePlacements(
+  descriptors: <NeoModuleDescriptor>[descriptor],
+  config: config,
+).first;
+
 void main() {
   group('NeoTopBarConfig.fromJson', () {
     test('treats a missing schema as no configuration', () {
@@ -44,7 +56,7 @@ void main() {
           'tray': <String, Object?>{'enabled': false},
         },
       });
-      expect(config.modules, isEmpty);
+      expect(config.instances, isEmpty);
     });
 
     test('rejects a newer schema instead of guessing at it', () {
@@ -54,7 +66,7 @@ void main() {
           'tray': <String, Object?>{'enabled': false},
         },
       });
-      expect(config.modules, isEmpty);
+      expect(config.instances, isEmpty);
     });
 
     test('reads per-module overrides and the saved order', () {
@@ -68,9 +80,9 @@ void main() {
           'start': <Object?>['cpu', 'tray'],
         },
       });
-      expect(config.isEnabled(_descriptors[0]), isFalse);
-      expect(config.isEnabled(_descriptors[3]), isTrue);
-      expect(config.zoneOf(_descriptors[3]), NeoZone.start);
+      expect(_firstInstance(config, _descriptors[0]).enabled, isFalse);
+      expect(_firstInstance(config, _descriptors[3]).enabled, isTrue);
+      expect(_firstInstance(config, _descriptors[3]).zone, NeoZone.start);
       expect(config.order[NeoZone.start], <String>['cpu', 'tray']);
     });
 
@@ -97,8 +109,8 @@ void main() {
         },
       });
       final restored = NeoTopBarConfig.fromJson(original.toJson());
-      expect(restored.isEnabled(_descriptors[3]), isTrue);
-      expect(restored.zoneOf(_descriptors[3]), NeoZone.start);
+      expect(_firstInstance(restored, _descriptors[3]).enabled, isTrue);
+      expect(_firstInstance(restored, _descriptors[3]).zone, NeoZone.start);
       expect(restored.order[NeoZone.start], <String>['cpu']);
     });
   });
@@ -119,9 +131,9 @@ void main() {
     });
 
     test('keeps disabled modules in the list so they can be re-enabled', () {
-      final config = NeoTopBarConfig.empty.withPreference(
+      final config = NeoTopBarConfig.empty.withInstance(
         'tray',
-        const NeoModulePreference(enabled: false),
+        const NeoModuleInstancePreference(moduleId: 'tray', enabled: false),
       );
       final placements = resolvePlacements(
         descriptors: _descriptors,
@@ -149,8 +161,11 @@ void main() {
 
     test('ignores a saved order entry whose module moved zone', () {
       final config = NeoTopBarConfig(
-        modules: <String, NeoModulePreference>{
-          'clock': const NeoModulePreference(zone: NeoZone.start),
+        instances: <String, NeoModuleInstancePreference>{
+          'clock': const NeoModuleInstancePreference(
+            moduleId: 'clock',
+            zone: NeoZone.start,
+          ),
         },
         order: <NeoZone, List<String>>{
           NeoZone.end: <String>['clock', 'cpu'],
@@ -280,9 +295,9 @@ void main() {
 
     test('a module with only settings still gets an entry', () {
       final config = NeoTopBarConfig.empty.withOption('clock', 'format', '24h');
-      expect(config.modules.containsKey('clock'), isTrue);
-      expect(config.isEnabled(clockModule), isTrue);
-      expect(config.zoneOf(clockModule), NeoZone.end);
+      expect(config.instances.containsKey('clock'), isTrue);
+      expect(_firstInstance(config, clockModule).enabled, isTrue);
+      expect(_firstInstance(config, clockModule).zone, NeoZone.end);
     });
 
     test('clearing the last setting drops the whole entry', () {
@@ -292,7 +307,7 @@ void main() {
         '24h',
       );
       final cleared = withOption.withOption('clock', 'format', null);
-      expect(cleared.modules, isEmpty);
+      expect(cleared.instances, isEmpty);
       expect(cleared.optionsOf('clock'), isEmpty);
     });
 
@@ -301,29 +316,35 @@ void main() {
       // scratch, which silently forgot the zone the user had chosen and would
       // now forget every module-specific setting as well.
       final moved = NeoTopBarConfig.empty
-          .withPreference('clock', NeoModulePreference(zone: NeoZone.start))
+          .withInstance(
+            'clock',
+            const NeoModuleInstancePreference(
+              moduleId: 'clock',
+              zone: NeoZone.start,
+            ),
+          )
           .withOption('clock', 'format', '24h');
-      final toggled = moved.withPreference(
+      final toggled = moved.withInstance(
         'clock',
-        moved.modules['clock']!.withEnabled(false),
+        moved.instances['clock']!.withEnabled(false),
       );
-      expect(toggled.zoneOf(clockModule), NeoZone.start);
+      expect(_firstInstance(toggled, clockModule).zone, NeoZone.start);
       expect(toggled.optionsOf('clock'), <String, Object?>{'format': '24h'});
-      expect(toggled.isEnabled(clockModule), isFalse);
+      expect(_firstInstance(toggled, clockModule).enabled, isFalse);
     });
 
     test('moving a module keeps its settings', () {
       final moved = NeoTopBarConfig.empty
           .withOption('clock', 'format', '24h')
-          .withPreference(
+          .withInstance(
             'clock',
             (NeoTopBarConfig.empty
                     .withOption('clock', 'format', '24h')
-                    .modules['clock'])!
+                    .instances['clock'])!
                 .withZone(NeoZone.start),
           );
       expect(moved.optionsOf('clock'), <String, Object?>{'format': '24h'});
-      expect(moved.zoneOf(clockModule), NeoZone.start);
+      expect(_firstInstance(moved, clockModule).zone, NeoZone.start);
     });
 
     test('drops values a JSON file could not round-trip', () {
@@ -346,19 +367,172 @@ void main() {
     });
   });
 
+  group('instances', () {
+    test('the first copy of a module is named by the module id alone', () {
+      expect(neoInstanceId('clock', 1), 'clock');
+      expect(neoInstanceId('clock', 2), 'clock#2');
+      expect(neoInstanceId('clock', 12), 'clock#12');
+    });
+
+    test('an instance id reports its number and its module', () {
+      expect(neoInstanceNumber('clock', 'clock'), 1);
+      expect(neoInstanceNumber('clock#2', 'clock'), 2);
+      expect(neoInstanceNumber('clock', 'cpu'), 0);
+      expect(neoInstanceNumber('clock#1', 'clock'), 0);
+      expect(neoInstanceNumber('clock#x', 'clock'), 0);
+      expect(neoInstanceNumber('clock#2#3', 'clock'), 0);
+    });
+
+    test('the next id reuses a freed number', () {
+      expect(neoNextInstanceId('clock', const <String>[]), 'clock');
+      expect(neoNextInstanceId('clock', const <String>['clock']), 'clock#2');
+      // The second copy was removed, so the next one is "2" again rather than
+      // "3": the numbers on the cards must not drift upwards forever.
+      expect(
+        neoNextInstanceId('clock', const <String>['clock', 'clock#3']),
+        'clock#2',
+      );
+    });
+
+    test('a card label carries the number only when it is needed', () {
+      expect(neoInstanceLabel('时钟与日期', 1), '时钟与日期');
+      expect(neoInstanceLabel('时钟与日期', 2), '时钟与日期 2');
+    });
+
+    test('the same module can be placed several times, in several zones', () {
+      var config = NeoTopBarConfig.empty;
+      // A second clock, on the left, alongside the default one.
+      config = config.withInstance(
+        'clock#2',
+        const NeoModuleInstancePreference(
+          moduleId: 'clock',
+          zone: NeoZone.start,
+        ),
+      );
+      final placements = resolvePlacements(
+        descriptors: neoTopBarDefaultModules,
+        config: config,
+      );
+      final clocks = placements
+          .where((placement) => placement.moduleId == 'clock')
+          .toList();
+      expect(clocks.map((placement) => placement.id), <String>[
+        'clock#2',
+        'clock',
+      ]);
+      expect(clocks.first.zone, NeoZone.start);
+      expect(clocks.last.zone, NeoZone.end);
+      expect(clocks.map((placement) => placement.label), <String>[
+        '时钟与日期 2',
+        '时钟与日期',
+      ]);
+    });
+
+    test('each copy keeps its own settings', () {
+      final config = NeoTopBarConfig.empty
+          .withOption('clock', 'format', '24h')
+          .withOption('clock#2', 'format', '12h');
+      expect(config.optionsOf('clock'), <String, Object?>{'format': '24h'});
+      expect(config.optionsOf('clock#2'), <String, Object?>{'format': '12h'});
+    });
+
+    test('a copy can be moved between zones without touching its twin', () {
+      final config = NeoTopBarConfig.empty.withInstance(
+        'clock#2',
+        const NeoModuleInstancePreference(moduleId: 'clock'),
+      );
+      final moved = moveModuleToSlot(
+        config: config,
+        descriptors: neoTopBarDefaultModules,
+        instanceId: 'clock#2',
+        targetZone: NeoZone.start,
+        beforeId: null,
+      );
+      final placements = resolvePlacements(
+        descriptors: neoTopBarDefaultModules,
+        config: moved,
+      );
+      final byId = <String, NeoModulePlacement>{
+        for (final placement in placements) placement.id: placement,
+      };
+      expect(byId['clock#2']!.zone, NeoZone.start);
+      expect(byId['clock']!.zone, NeoZone.end);
+    });
+
+    test('an instance is forgotten entirely, not just switched off', () {
+      final config = NeoTopBarConfig.empty.withInstance(
+        'clock#2',
+        const NeoModuleInstancePreference(moduleId: 'clock'),
+      );
+      final removed = config.withoutInstance('clock#2');
+      expect(removed.instances, isEmpty);
+      expect(
+        resolvePlacements(
+          descriptors: neoTopBarDefaultModules,
+          config: removed,
+        ).where((placement) => placement.id == 'clock#2'),
+        isEmpty,
+      );
+    });
+
+    test('a v1 file loads as the first instance of each module', () {
+      // The old shape: one entry per module under `modules`, and an order list
+      // of module ids. Every one of those ids is already a valid instance id.
+      final restored = NeoTopBarConfig.fromJson(<String, Object?>{
+        'schema': 1,
+        'modules': <String, Object?>{
+          'clock': <String, Object?>{
+            'enabled': true,
+            'zone': 'start',
+            'options': <String, Object?>{'format': '24h'},
+          },
+          'tray': <String, Object?>{'enabled': false},
+        },
+        'order': <String, Object?>{
+          'start': <String>['clock', 'workspaces'],
+        },
+      });
+      expect(restored.instanceEntry('clock')?.moduleId, 'clock');
+      expect(restored.instanceEntry('clock')?.zone, NeoZone.start);
+      expect(restored.optionsOf('clock'), <String, Object?>{'format': '24h'});
+      expect(restored.instanceEntry('tray')?.enabled, isFalse);
+      expect(restored.order[NeoZone.start], <String>['clock', 'workspaces']);
+    });
+
+    test('pruning drops copies of modules this build does not have', () {
+      final config = NeoTopBarConfig.empty
+          .withInstance(
+            'ghost#2',
+            const NeoModuleInstancePreference(moduleId: 'ghost'),
+          )
+          .withInstance(
+            'clock#2',
+            const NeoModuleInstancePreference(moduleId: 'clock'),
+          );
+      final pruned = config.prune(neoTopBarDefaultModules);
+      expect(pruned.instances.keys, <String>['clock#2']);
+    });
+  });
+
   group('prune', () {
     test('drops ids the current build does not know', () {
       final config = NeoTopBarConfig(
-        modules: <String, NeoModulePreference>{
-          'tray': const NeoModulePreference(enabled: false),
-          'ghost': const NeoModulePreference(enabled: true),
+        instances: <String, NeoModuleInstancePreference>{
+          'tray': const NeoModuleInstancePreference(
+            moduleId: 'tray',
+            enabled: false,
+          ),
+          'ghost': const NeoModuleInstancePreference(
+            moduleId: 'ghost',
+            enabled: true,
+          ),
         },
         order: <NeoZone, List<String>>{
           NeoZone.start: <String>['ghost', 'tray'],
         },
       );
       final pruned = config.prune(_descriptors);
-      expect(pruned.modules.keys, <String>['tray']);
+      expect(pruned.instances.keys, <String>['tray']);
       expect(pruned.order[NeoZone.start], <String>['tray']);
     });
   });
@@ -446,7 +620,7 @@ void main() {
       final moved = moveModuleInZone(
         config: NeoTopBarConfig.empty,
         descriptors: neoTopBarDefaultModules,
-        moduleId: NeoModuleIds.battery,
+        instanceId: NeoModuleIds.battery,
         offset: -1,
       );
       expect(moved.order[NeoZone.end], <String>[
@@ -467,7 +641,7 @@ void main() {
       final moved = moveModuleInZone(
         config: NeoTopBarConfig.empty,
         descriptors: neoTopBarDefaultModules,
-        moduleId: NeoModuleIds.notifications,
+        instanceId: NeoModuleIds.notifications,
         offset: -1,
       );
       final after = zoneOrder(moved, NeoZone.end);
@@ -485,7 +659,7 @@ void main() {
         moveModuleInZone(
           config: config,
           descriptors: neoTopBarDefaultModules,
-          moduleId: NeoModuleIds.tray,
+          instanceId: NeoModuleIds.tray,
           offset: -1,
         ).order,
         config.order,
@@ -494,7 +668,7 @@ void main() {
         moveModuleInZone(
           config: config,
           descriptors: neoTopBarDefaultModules,
-          moduleId: NeoModuleIds.clock,
+          instanceId: NeoModuleIds.clock,
           offset: 1,
         ).order,
         config.order,
@@ -513,7 +687,7 @@ void main() {
       final moved = moveModuleInZone(
         config: config,
         descriptors: neoTopBarDefaultModules,
-        moduleId: NeoModuleIds.media,
+        instanceId: NeoModuleIds.media,
         offset: 1,
       );
       expect(zoneOrder(moved, NeoZone.end), <String>[
@@ -529,14 +703,17 @@ void main() {
     });
 
     test('reorders inside the zone a module was moved to', () {
-      final config = NeoTopBarConfig.empty.withPreference(
+      final config = NeoTopBarConfig.empty.withInstance(
         NeoModuleIds.clock,
-        const NeoModulePreference(zone: NeoZone.start),
+        const NeoModuleInstancePreference(
+          moduleId: NeoModuleIds.clock,
+          zone: NeoZone.start,
+        ),
       );
       final moved = moveModuleInZone(
         config: config,
         descriptors: neoTopBarDefaultModules,
-        moduleId: NeoModuleIds.clock,
+        instanceId: NeoModuleIds.clock,
         offset: 1,
       );
       expect(zoneOrder(moved, NeoZone.start), <String>[
@@ -555,7 +732,7 @@ void main() {
         moveModuleInZone(
           config: config,
           descriptors: neoTopBarDefaultModules,
-          moduleId: 'ghost',
+          instanceId: 'ghost',
           offset: 1,
         ).order,
         isEmpty,
@@ -564,7 +741,7 @@ void main() {
         moveModuleInZone(
           config: config,
           descriptors: neoTopBarDefaultModules,
-          moduleId: NeoModuleIds.tray,
+          instanceId: NeoModuleIds.tray,
           offset: 0,
         ).order,
         isEmpty,
@@ -585,7 +762,7 @@ void main() {
       final moved = moveModuleToSlot(
         config: NeoTopBarConfig.empty,
         descriptors: neoTopBarDefaultModules,
-        moduleId: NeoModuleIds.clock,
+        instanceId: NeoModuleIds.clock,
         targetZone: NeoZone.end,
         beforeId: NeoModuleIds.tray,
       );
@@ -606,7 +783,7 @@ void main() {
       final moved = moveModuleToSlot(
         config: NeoTopBarConfig.empty,
         descriptors: neoTopBarDefaultModules,
-        moduleId: NeoModuleIds.tray,
+        instanceId: NeoModuleIds.tray,
         targetZone: NeoZone.end,
         beforeId: null,
       );
@@ -617,7 +794,7 @@ void main() {
       final moved = moveModuleToSlot(
         config: NeoTopBarConfig.empty,
         descriptors: neoTopBarDefaultModules,
-        moduleId: NeoModuleIds.clock,
+        instanceId: NeoModuleIds.clock,
         targetZone: NeoZone.start,
         beforeId: null,
       );
@@ -630,26 +807,26 @@ void main() {
         isNot(contains(NeoModuleIds.clock)),
       );
       // A zone override is recorded because start is not the descriptor default.
-      expect(moved.modules[NeoModuleIds.clock]?.zone, NeoZone.start);
+      expect(moved.instances[NeoModuleIds.clock]?.zone, NeoZone.start);
     });
 
     test('drops the zone override when a module lands back home', () {
       final away = moveModuleToSlot(
         config: NeoTopBarConfig.empty,
         descriptors: neoTopBarDefaultModules,
-        moduleId: NeoModuleIds.clock,
+        instanceId: NeoModuleIds.clock,
         targetZone: NeoZone.start,
         beforeId: null,
       );
-      expect(away.modules[NeoModuleIds.clock]?.zone, NeoZone.start);
+      expect(away.instances[NeoModuleIds.clock]?.zone, NeoZone.start);
       final home = moveModuleToSlot(
         config: away,
         descriptors: neoTopBarDefaultModules,
-        moduleId: NeoModuleIds.clock,
+        instanceId: NeoModuleIds.clock,
         targetZone: NeoZone.end,
         beforeId: null,
       );
-      expect(home.modules[NeoModuleIds.clock]?.zone, isNull);
+      expect(home.instances[NeoModuleIds.clock]?.zone, isNull);
       expect(zoneOrder(home, NeoZone.end).last, NeoModuleIds.clock);
     });
 
@@ -666,7 +843,7 @@ void main() {
       final moved = moveModuleToSlot(
         config: config,
         descriptors: neoTopBarDefaultModules,
-        moduleId: NeoModuleIds.clock,
+        instanceId: NeoModuleIds.clock,
         targetZone: NeoZone.center,
         beforeId: null,
       );
@@ -675,19 +852,22 @@ void main() {
     });
 
     test('preserves an existing enabled preference while moving', () {
-      final config = NeoTopBarConfig.empty.withPreference(
+      final config = NeoTopBarConfig.empty.withInstance(
         NeoModuleIds.media,
-        const NeoModulePreference(enabled: true),
+        const NeoModuleInstancePreference(
+          moduleId: NeoModuleIds.media,
+          enabled: true,
+        ),
       );
       final moved = moveModuleToSlot(
         config: config,
         descriptors: neoTopBarDefaultModules,
-        moduleId: NeoModuleIds.media,
+        instanceId: NeoModuleIds.media,
         targetZone: NeoZone.start,
         beforeId: null,
       );
-      expect(moved.modules[NeoModuleIds.media]?.enabled, isTrue);
-      expect(moved.modules[NeoModuleIds.media]?.zone, NeoZone.start);
+      expect(moved.instances[NeoModuleIds.media]?.enabled, isTrue);
+      expect(moved.instances[NeoModuleIds.media]?.zone, NeoZone.start);
     });
 
     test('ignores unknown ids and a drop on itself', () {
@@ -696,7 +876,7 @@ void main() {
         moveModuleToSlot(
           config: config,
           descriptors: neoTopBarDefaultModules,
-          moduleId: 'ghost',
+          instanceId: 'ghost',
           targetZone: NeoZone.end,
           beforeId: NeoModuleIds.tray,
         ).order,
@@ -706,7 +886,7 @@ void main() {
         moveModuleToSlot(
           config: config,
           descriptors: neoTopBarDefaultModules,
-          moduleId: NeoModuleIds.tray,
+          instanceId: NeoModuleIds.tray,
           targetZone: NeoZone.end,
           beforeId: NeoModuleIds.tray,
         ).order,
@@ -716,7 +896,7 @@ void main() {
         moveModuleToSlot(
           config: config,
           descriptors: neoTopBarDefaultModules,
-          moduleId: NeoModuleIds.tray,
+          instanceId: NeoModuleIds.tray,
           targetZone: NeoZone.end,
           beforeId: 'ghost',
         ).order,

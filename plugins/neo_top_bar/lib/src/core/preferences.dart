@@ -102,8 +102,13 @@ class NeoTopBarPreferencesStore {
     }
     final encoded = config.toJson();
     json['schema'] = config.schema;
-    json['modules'] = encoded['modules'];
+    json['instances'] = encoded['instances'];
     json['order'] = encoded['order'];
+    // A file written by an older build stored one entry per *module* under
+    // `modules`. It is read as the instances of the same name and rewritten
+    // here, so leaving it behind would put a second, stale copy of every
+    // decision in the file.
+    json.remove('modules');
     await file.parent.create(recursive: true);
     final temp = File('${file.path}.$pid.${_tempSequence++}.tmp');
     try {

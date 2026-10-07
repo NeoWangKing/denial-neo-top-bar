@@ -91,6 +91,7 @@ class NeoModuleContext {
     required this.side,
     required this.accent,
     required this.density,
+    this.crossExtent = 40,
     this.options = const <String, Object?>{},
   });
 
@@ -108,6 +109,24 @@ class NeoModuleContext {
 
   /// Multiplier applied to card padding and gaps.
   final double density;
+
+  /// Height of a pill on this bar, in logical pixels: the thickness Denial
+  /// reserves for the strip, minus the padding the bar keeps at its edges.
+  ///
+  /// This is what icon sizes are derived from. A bar's glyphs should grow with
+  /// the *bar*, which the user sets in Denial's own settings, and not with this
+  /// plugin's spacing scale: switching between compact and comfortable is a
+  /// request for less or more air between pills, not for smaller or larger
+  /// icons inside them.
+  final double crossExtent;
+
+  /// Size for a glyph that should occupy [fraction] of the pill's height.
+  ///
+  /// Clamped to a legible range, because a very thin bar would otherwise ask for
+  /// an icon nobody can see and a very thick one for an icon taller than its
+  /// neighbours' text.
+  double glyphSize(double fraction, {double min = 14, double max = 30}) =>
+      (crossExtent * fraction).clamp(min, max).toDouble();
 
   /// This module's stored settings, as the user left them.
   ///

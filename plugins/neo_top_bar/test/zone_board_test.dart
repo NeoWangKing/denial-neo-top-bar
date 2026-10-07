@@ -74,43 +74,44 @@ void main() {
   });
 
   group('neoAddCandidates', () {
-    test('offers what is not already on the zone', () {
+    test('offers every module, including ones already on the bar', () {
       final candidates = neoAddCandidates(
+        descriptors: _descriptors,
         placements: placements(),
-        zone: NeoZone.start,
       );
-      // 'a' and 'b' are already on the left, so only the other two are offered.
       expect(candidates.map((entry) => entry.descriptor.id), <String>[
+        'a',
+        'b',
         'c',
         'd',
       ]);
     });
 
-    test('distinguishes a move from an add, and says where it is now', () {
-      final candidates = neoAddCandidates(
-        placements: placements(),
-        zone: NeoZone.start,
-      );
-      final move = candidates.singleWhere(
-        (entry) => entry.descriptor.id == 'c',
-      );
-      expect(move.effect, NeoAddEffect.move);
-      expect(move.currentZone, NeoZone.end);
-
-      final add = candidates.singleWhere((entry) => entry.descriptor.id == 'd');
-      expect(add.effect, NeoAddEffect.add);
-      expect(add.currentZone, isNull);
-    });
-
-    test('a fully populated zone offers nothing', () {
-      final all = placements().map((placement) {
-        return NeoModulePlacement(
-          descriptor: placement.descriptor,
-          enabled: true,
+    test('counts the copies that are on the bar', () {
+      final onTheBar = <NeoModulePlacement>[
+        ...placements(),
+        // A second copy of 'a', which is what an instance makes possible.
+        NeoModulePlacement(
+          id: 'a#2',
+          moduleId: 'a',
+          descriptor: _descriptors.first,
           zone: NeoZone.center,
-        );
-      });
-      expect(neoAddCandidates(placements: all, zone: NeoZone.center), isEmpty);
+          enabled: true,
+        ),
+      ];
+      final candidates = neoAddCandidates(
+        descriptors: _descriptors,
+        placements: onTheBar,
+      );
+      final first = candidates.singleWhere(
+        (entry) => entry.descriptor.id == 'a',
+      );
+      expect(first.existing, 2);
+      // 'd' is switched off, so nothing of it is on the bar.
+      expect(
+        candidates.singleWhere((entry) => entry.descriptor.id == 'd').existing,
+        0,
+      );
     });
   });
 }
