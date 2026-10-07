@@ -16,7 +16,7 @@
 | 模块 | id | 区 | 默认 | 说明 |
 |---|---|---|---|---|
 | 工作区胶囊 | `workspaces` | 左 | 开 | 每个工作区一个圆点，当前工作区高亮，占用状态变实心；点击切换 |
-| 应用启动器 | `launcher` | 中 | 开 | Arch Linux 图标，点击调 `services.toggleLauncher()`；启动器界面由 Denial 自己提供 |
+| 应用启动器 | `launcher` | 中 | 开 | Arch Linux 图标 + **当前工作区每个窗口的图标**，点击图标聚焦该窗口、点击其余部分调 `services.toggleLauncher()`；胶囊宽度随窗口数动态伸缩，超过 10 个折叠成 `+N` |
 | 系统托盘 | `tray` | 右 | 开 | StatusNotifier 图标；托盘隐藏或为空时整块自动消失 |
 | 通知 | `notifications` | 右 | 开 | 未读徽章 + 历史面板（逐条忽略 / 全部清除 / 免打扰） |
 | 媒体播放 | `media` | 右 | **关** | 曲目 + 上一首 / 播放暂停 / 下一首；无播放时自动消失 |
@@ -246,10 +246,24 @@ lib/
 
 ## 已知限制
 
-1. **工作区胶囊暂不显示应用图标**。SDK 暴露了 `services.windows(monitorId)` 和
-   `buildApplicationIcon`，但 `ApplicationWindow` **没有 workspace 字段**，无法判断某个窗口
-   属于哪个工作区，所以"每个工作区里显示该区应用图标、点击聚焦"这件事需要上游补一个
-   工作区字段或新的 `@ExtensionPoint`。当前工作区胶囊只做数量/当前/占用/切换。
+1. **工作区胶囊仍然做不到"每个工作区各自显示图标"，但我之前给的结论是错的。**
+   我当时断言：`ApplicationWindow` 没有 workspace 字段，所以插件无法判断窗口属于哪个
+   工作区，必须等上游加字段。**这个判断是错的**——宿主自己的实现早就过滤好了：
+
+   ```dart
+   // denial_desktop/lib/src/core/shell_plugin_services.dart 的 _windows
+   if (window.monitorId == monitorId &&
+       (window.minimized || window.pinned ||
+        window.workspaceId == desktop.activeWorkspaceFor(monitorId)))
+   ```
+
+   也就是说 `services.windows(monitorId)` 返回的**就是**"这块屏当前工作区的窗口"
+   （外加最小化和固定显示的）。插件根本不需要那个字段。启动器胶囊现在正是用它显示
+   窗口图标。
+
+   **仍然做不到的是其它工作区的窗口**：API 只暴露当前工作区的，
+   所以"工作区胶囊里每个工作区各自列自己的应用"还是需要上游补能力。
+   当前工作区胶囊只做数量/当前/占用/切换。
 2. **无法添加内存 / 网络 / 磁盘模块**。`ShellTelemetryServices` 只提供
    `battery` / `cpu` / `gpus` / `clock` / `media`，插件拿不到这些数据源。
 3. **排序有两种方式**：在顶栏上**长按拖动胶囊**（推荐，可以跨区），或在设置面板里
