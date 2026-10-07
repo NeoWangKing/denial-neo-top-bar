@@ -166,7 +166,7 @@ DENIAL_PLUGIN_DART="$(command -v dart)"
 
 ```
 lib/
-  neo_top_bar.dart          @Plugin() 入口：ShellSurface + ShellWorkArea 两个贡献
+  neo_top_bar.dart          @Plugin() 入口：ShellSurface + ShellWorkArea + ShellAction
   neo_top_bar_logic.dart    纯 Dart 导出，供测试使用（不引 Flutter widget）
   src/core/
     module_descriptor.dart  模块身份类型（id / 标签 / 区 / 优先级 / 默认开关）
@@ -176,10 +176,13 @@ lib/
     config.dart             配置模型、JSON 解析、区/排序解析（NeoDensity）
     config_state.dart       运行时配置状态（内存生效 + 后台持久化）
     preferences.dart        配置文件读写（原子写、保留未知键、写合并）
+    drop_target.dart        落点解析（先判区，再判区内间隙）
+    bar_drag_layout.dart    三个区的几何：显式坐标 / 拖动预览共用
+    popup_geometry.dart     面板锚定几何（不引 dart:ui，可单测）
     calendar_data.dart      日历的纯日期逻辑
   src/modules/              每个模块一个文件
   src/widgets/
-    neo_bar.dart            三个区的布局、右键菜单接线
+    neo_bar.dart            三个区的布局、拖动、右键菜单接线
     neo_card.dart           药丸卡片外观（玻璃 / 渐变 / hover / 聚焦）
     neo_popup_surface.dart  弹出面板外观
     module_settings_panel.dart  组件设置面板
@@ -213,30 +216,58 @@ lib/
 被拖动的胶囊**仍然计入**它所在区间的范围：它的槽位尺寸不变，而且如果一个区只有它一个
 胶囊（比如中间区的启动器），把它排除就会让那个区变成无法投放到的地方。
 
-### 拖动预览：不能让手势宿主被销毁
+### 手势宿主不能被销毁
 
-拖动预览会**替换整棵 widget 树**，承载长按的 `_DraggablePill` 也被换掉。这是致命的：
+承载长按的 `_DraggablePill` 只要被**重建**（换了 element），拖动就废了：
 Flutter 在手势识别器 `dispose` 时**不会调用 `onLongPressEnd` / `onLongPressCancel`**
 （`OneSequenceGestureRecognizer.dispose` 只把指针路由摘掉），所以那个拖动**永远收不到
 后续的 move / end 回调**。症状很有欺骗性：
 
 - 被拖的胶囊被"定格"在按下位置 → 看起来是"某个胶囊卡死了"
-- 预览布局里没有 `_DraggablePill` 包装 → **所有胶囊都没有长按处理器** → 什么都拖不动
-- `_draggingId` 清不掉 → 永久卡在预览分支，直到外壳重启
+- 布局里没有 `_DraggablePill` 包装 → **所有胶囊都没有长按处理器** → 什么都拖不动
+- `_draggingId` 清不掉 → 永久卡在拖动状态，直到外壳重启
 
-修法是给跟随指针的反馈挂**同一个 GlobalKey**：GlobalKey 会让 Flutter **搬迁 element
-而不是重建**，识别器和进行中的手势就活下来了。反馈外面的 `IgnorePointer` 不影响它——
-已被接受的长按是通过指针路由收 move/up 的，不靠命中测试。
+修法是每个胶囊挂一个**按 id 稳定的 GlobalKey**（`_pillKeys`）：GlobalKey 会让 Flutter
+**搬迁 element 而不是重建**，识别器和进行中的手势就活下来了。这条现在承受的压力比以前
+更大——不仅拖动预览要复用它，**flex 与显式定位之间来回切换时也要复用**。
 
 另外加了一道兜底：顶栏的 `Listener` 也监听 `onPointerUp` / `onPointerCancel`，
 指针在栏内抬起时无论如何都会结束拖动，避免再出现"永久卡住"。
 
-### 拖动预览：显式定位 + 冻结落点
+### 常驻显式定位：让任何排序变化都能动
 
-拖动期间顶栏**不用 flex 布局**，改成按 `neoDragLayout` 算出的显式坐标放置，
-这样 `AnimatedPositioned` 才能在落点变化时把"让位"动画做出来。
+顶栏**平时**就用显式坐标放置（`neoDragLayout` 算出的 `main` / `cross`），
+不是只在拖动时才切过去。原因很直接：显式坐标意味着每颗胶囊都是
+`AnimatedPositioned`，于是**任何**顺序变化都会自己滑到位——
+
+- 在栏上长按拖动（预览顺序来自 `moveModuleToSlot`）
+- 在设置卡片里点 ↑ ↓ 或换区（`config_state` 通知之后重建）
+
+早先只在拖动时切显式定位，从设置卡片改顺序是**瞬间跳到新位置**的，因为平时是 flex，
+flex 只描述"最终排布"，没有"上一帧在哪"。现在两条路径共用同一套动画。
+
 布局函数必须和 flex 的规则逐条一致（start 贴前缘、center 居中、end 贴后缘），
-否则拖动开始和结束的瞬间胶囊会跳。它是纯函数，有单测钉住。
+否则第一次切换布局时会跳。它是纯函数，有单测钉住。
+
+flex 布局降级为**测量 + 溢出兜底**，两种情况仍会用它：
+
+1. **首帧 / 内容变化后的一帧**：胶囊尺寸要等布局完成才知道，所以显式定位永远慢一帧
+   （`_scheduleMeasure` 在 post-frame 里量完再 `setState`）。两种布局在这些位置上一致，
+   所以这一帧看不出来。
+2. **放不下**：胶囊按内容自身定尺（时钟、百分比、托盘），显式定位无法重叠两个区，
+   所以总量超出栏长时改回 flex，让区可以滚动。
+
+拖动中每颗胶囊的 widget 实例按 `_moduleCache` 缓存，key 是模块上下文的
+`Object.hash`（services / monitorId / side / accent / density）。指针每动一帧都会重建
+widget 树，复用实例能让 Flutter 跳过整棵子树的重建（包括宿主渲染的托盘）；
+它失效的唯一条件是这些上下文真的变了。模块内容本身都是 `ConsumerWidget`，
+providers 变化时自己重建，不依赖父级重建。
+
+### 拖动：冻结落点
+
+**落点测量在拖动开始时冻结**（`_dragRects` / `_dragZones`）。
+不能边拖边测：预览本身会重排布局，实时测量会让"目标位置"依赖"目标位置自己造成的
+布局"，形成反馈循环，落点会在两个位置间反复跳。
 
 **长按一到临界值就开始居中，不需要你先动鼠标。** 这里踩过一个坑：
 `_moveFeedback` 原本在指针事件里就把中心**算好存起来**，而动画跑的时候没有指针事件，
@@ -273,23 +304,15 @@ _anchorCross   垂直中心，抓住时记下后整个拖动过程恒定
 360ms → 210.0   中心与鼠标重合
 ```
 
-```
-  0ms → 160.0   原位，无跳变
- 50ms → 170.0
-100ms → 187.6
-200ms → 202.0
-450ms → 210.0   中心与鼠标重合
-```
-
 "变大一档"用的是**同一组时长与曲线**，所以"变大 + 移过来"读起来是一个动作（拿起），
 而不是两个。按下/抬起的即时反馈仍然是弹簧（`snappy` / `bouncy`），保持点击的灵敏手感。
 
 **抓取偏移是"动画归零"的，不是一步到位**：
 
 ```
-抓住时记下  _grabDelta = 胶囊中心 − 按下点
-_grab 弹簧  0 → 1（Motion.gentle）
-反馈中心   = 指针 + _grabDelta × (1 − _grab)
+抓住时记下  _grabMain = 胶囊中心 − 按下点（主轴）
+_grab       0 → 1，360ms + Motion.md3Emphasized
+反馈中心    = 指针 + _grabMain × (1 − _grab)
 ```
 
 两个极端都试过，最后定位到中间这个：
@@ -300,22 +323,14 @@ _grab 弹簧  0 → 1（Motion.gentle）
 | 反馈中心 = 指针 + 固定偏移 | 完全不跳 | ✓ 但胶囊永远停在抓取点，不会自动居中 |
 | **反馈中心 = 指针 + 动画归零的偏移** | 首帧在原位，随后滑到光标下 | ✓✓ 现在的做法 |
 
-所以长按触发拖动时：**第一帧胶囊就在你抓住它的位置**（无跳变），然后用 `Motion.gentle`
-在约 0.2 秒内滑到光标下方，最终**胶囊中心与鼠标重合**。
+所以长按触发拖动时：**第一帧胶囊就在你抓住它的位置**（无跳变），然后用上面那组时长曲线
+在 0.36 秒内滑到光标下方，最终**胶囊中心与鼠标重合**。
 
 只有**主轴**（横栏 = 水平方向）做居中：栏只有一颗胶囊那么高，垂直方向去对齐光标只会
 把胶囊顶到栏边上被裁掉，没有意义。
 
 落点判定用的是同一个"当前位置"（指针 + 当前偏移），所以滑动过程中判定跟着胶囊走，
 而不是跟着鼠标走。
-
-**落点测量在拖动开始时冻结**（`_dragRects` / `_dragZones`）。
-不能边拖边测：预览本身会重排布局，实时测量会让"目标位置"依赖"目标位置自己造成的
-布局"，形成反馈循环，落点会在两个位置间反复跳。
-
-拖动时每个模块的 widget 实例也在开始时构建一次并复用（`_dragChildren`）：
-预览每帧都因指针移动而重建，复用实例能让 Flutter 只移动已有 element，
-而不是每秒 60 次重建每个模块的子树（包括宿主渲染的托盘）。
 
 虚影是**形状**而不是胶囊的第二次构建：半透明副本会把 `ShellBackdropBlur` 包进图层
 （玻璃会采到图层而不是壁纸），而且会要求宿主托盘渲染两遍。

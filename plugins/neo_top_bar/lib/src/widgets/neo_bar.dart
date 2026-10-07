@@ -136,6 +136,11 @@ class _NeoTopBarState extends ConsumerState<NeoTopBar> {
 /// A symmetric emphasised ease, shortened rather than replaced: the decelerating
 /// curves start far too fast (Motion.md3EmphasizedDecelerate covers most of the
 /// distance in the first tenth), which is the snap this is meant to avoid.
+/// Padding between the strip's edge and the outermost pill, along the bar and
+/// across it. Shared by both layouts and by the drag preview so they agree.
+const double _mainPadding = 8;
+const double _crossPadding = 5;
+
 const Duration _pickUpDuration = Duration(milliseconds: 360);
 const Curve _pickUpCurve = Motion.md3Emphasized;
 
@@ -178,6 +183,15 @@ class _BarContentState extends State<_BarContent>
   final GlobalKey _stripKey = GlobalKey(debugLabel: 'neo-top-bar-strip');
 
   final Map<String, GlobalKey> _pillKeys = <String, GlobalKey>{};
+
+  /// Measured size of each visible pill along the bar's main axis.
+  ///
+  /// Explicit positioning has to know a pill's size before placing it, and that
+  /// size comes from the pill's own content. It is read one frame behind, which
+  /// is why the flex layout stays as a fallback rather than as dead code.
+  Map<String, double> _pillExtents = const <String, double>{};
+
+  bool _measureScheduled = false;
 
   /// Visible pills in bar order, refreshed on every non-drag build.
   List<_PillSlot> _slots = const <_PillSlot>[];
@@ -225,14 +239,6 @@ class _BarContentState extends State<_BarContent>
   /// Zone extents derived from [_dragRects], in bar order.
   List<NeoZoneExtent> _dragZones = const <NeoZoneExtent>[];
 
-  /// A module widget per visible pill, built once when the drag starts.
-  ///
-  /// The drag preview is positioned from the pointer, so it rebuilds every
-  /// frame. Reusing the same widget instances means Flutter only moves the
-  /// existing elements instead of rebuilding every module's subtree — including
-  /// the host-rendered tray — sixty times a second.
-  Map<String, Widget> _dragChildren = const <String, Widget>{};
-
   bool get _horizontal => widget.side.isHorizontal;
 
   /// The grab distance still in effect: full when the drag starts, zero once the
@@ -276,11 +282,36 @@ class _BarContentState extends State<_BarContent>
   GlobalKey _keyFor(String id) =>
       _pillKeys.putIfAbsent(id, () => GlobalKey(debugLabel: 'neo-pill-$id'));
 
+  /// Module widgets, reused across builds.
+  ///
+  /// Returning the same instance makes Flutter skip rebuilding that module's
+  /// subtree — the tray is rendered by the host and is not cheap — so this
+  /// matters on every frame the pointer moves. Invalidated whenever the context
+  /// the widgets were built from changes.
+  Map<String, Widget> _moduleCache = const <String, Widget>{};
+  int? _moduleCacheKey;
+
   Widget _module(
     BuildContext context,
     NeoModuleContext moduleContext,
     String id,
-  ) => NeoTopBarModules.byId(id)!.build(context, moduleContext);
+  ) {
+    final key = Object.hash(
+      moduleContext.services,
+      moduleContext.monitorId,
+      moduleContext.side,
+      moduleContext.accent,
+      moduleContext.density,
+    );
+    if (_moduleCacheKey != key) {
+      _moduleCacheKey = key;
+      _moduleCache = <String, Widget>{};
+    }
+    return _moduleCache.putIfAbsent(
+      id,
+      () => NeoTopBarModules.byId(id)!.build(context, moduleContext),
+    );
+  }
 
   bool _isVisible(NeoModulePlacement placement, NeoModuleContext context) {
     if (!placement.enabled) return false;
@@ -327,7 +358,6 @@ class _BarContentState extends State<_BarContent>
         zones.add(NeoZoneExtent(zone: slot.zone, start: start, end: end));
       }
     }
-    final moduleContext = _moduleContext;
     final grabbed = rects[id];
     final strip = _stripKey.currentContext?.findRenderObject();
     if (strip is RenderBox && strip.attached && grabbed != null) {
@@ -347,11 +377,6 @@ class _BarContentState extends State<_BarContent>
     setState(() {
       _dragRects = rects;
       _dragZones = zones;
-      _dragChildren = <String, Widget>{
-        for (final slot in _slots)
-          if (rects.containsKey(slot.id))
-            slot.id: _module(context, moduleContext, slot.id),
-      };
       _draggingId = id;
       _moveFeedback(globalPosition);
       _updateTarget(globalPosition);
@@ -463,7 +488,6 @@ class _BarContentState extends State<_BarContent>
       _targetZone = null;
       _dragRects = const <String, Rect>{};
       _dragZones = const <NeoZoneExtent>[];
-      _dragChildren = const <String, Widget>{};
       _grabMain = 0;
       _anchorCross = 0;
     });
@@ -512,57 +536,243 @@ class _BarContentState extends State<_BarContent>
       },
       child: LayoutBuilder(
         builder: (context, constraints) {
-          if (_draggingId != null && _targetZone != null) {
-            return _buildDragPreview(
+          final size = constraints.biggest;
+          // While dragging, the order on screen is a preview of the drop; the
+          // same pure function that will be persisted produces it.
+          final draggingId = _draggingId;
+          final targetZone = _targetZone;
+          final config = draggingId != null && targetZone != null
+              ? moveModuleToSlot(
+                  config: widget.state.config,
+                  descriptors: descriptors,
+                  moduleId: draggingId,
+                  targetZone: targetZone,
+                  beforeId: _targetBeforeId,
+                )
+              : widget.state.config;
+          final visible = _visiblePlacements(
+            config,
+            descriptors,
+            moduleContext,
+          );
+
+          // Explicit positions whenever they are known, so that *any* change of
+          // order animates — a drag, or a reorder from the settings card. The
+          // flex layout is the fallback for the first frame and for a bar whose
+          // content is too wide to place, where scrolling matters more than
+          // animation.
+          final extents = _knownExtents(visible);
+          if (extents != null &&
+              _fitsInStrip(size, visible, extents, density)) {
+            return _buildPositionedLayout(
               context: context,
               theme: theme,
-              size: constraints.biggest,
+              size: size,
+              visible: visible,
+              extents: extents,
               moduleContext: moduleContext,
-              descriptors: descriptors,
               density: density,
             );
           }
+          _scheduleMeasure();
           return _buildFlexLayout(
             context: context,
             theme: theme,
             horizontal: horizontal,
             density: density,
             moduleContext: moduleContext,
-            descriptors: descriptors,
+            visible: visible,
           );
         },
       ),
     );
   }
 
-  /// The resting layout: zones spread, pills sized by their content.
+  /// The measured size of every visible pill, or null when one is still unknown.
+  Map<String, double>? _knownExtents(List<NeoModulePlacement> visible) {
+    final extents = <String, double>{};
+    for (final placement in visible) {
+      final extent = _pillExtents[placement.descriptor.id];
+      if (extent == null) return null;
+      extents[placement.descriptor.id] = extent;
+    }
+    return extents;
+  }
+
+  /// Whether every pill fits with the zones still apart.
+  ///
+  /// A pill sizes itself from its content — a clock, a percentage, the tray — so
+  /// the sum is the only cheap guarantee that explicit positioning cannot overlap
+  /// two zones. When it does not fit, the flex layout scrolls instead.
+  bool _fitsInStrip(
+    Size size,
+    List<NeoModulePlacement> visible,
+    Map<String, double> extents,
+    double density,
+  ) {
+    final main = _horizontal ? size.width : size.height;
+    var total = _mainPadding * 2;
+    for (var index = 0; index < visible.length; index++) {
+      total += extents[visible[index].descriptor.id]!;
+      if (index > 0) total += 6 * density;
+    }
+    return total <= main;
+  }
+
+  /// Reads each pill's laid-out size, for the next frame's explicit layout.
+  ///
+  /// One frame behind by construction, which is why the flex layout is a
+  /// fallback rather than a special case: the two agree on positions, so falling
+  /// back for a frame is invisible, and a content change is corrected the frame
+  /// after it happens.
+  void _scheduleMeasure() {
+    if (_measureScheduled) return;
+    _measureScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _measureScheduled = false;
+      if (!mounted) return;
+      final horizontal = _horizontal;
+      final next = <String, double>{};
+      var changed = false;
+      for (final slot in _slots) {
+        final box = slot.key.currentContext?.findRenderObject();
+        if (box is! RenderBox || !box.attached || !box.hasSize) continue;
+        final extent = horizontal ? box.size.width : box.size.height;
+        next[slot.id] = extent;
+        if (_pillExtents[slot.id] != extent) changed = true;
+      }
+      if (next.length != _pillExtents.length) changed = true;
+      if (changed) setState(() => _pillExtents = next);
+    });
+  }
+
+  /// The resting layout, with every pill at an explicit offset.
+  ///
+  /// Positions are explicit so that `AnimatedPositioned` can carry a pill to its
+  /// new place whenever the order changes — from a drag, or from the settings
+  /// card. The pill the user is holding is the exception: it sits under the
+  /// pointer and is moved by the grab animation, not by the layout.
+  Widget _buildPositionedLayout({
+    required BuildContext context,
+    required ShellThemeData theme,
+    required Size size,
+    required List<NeoModulePlacement> visible,
+    required Map<String, double> extents,
+    required NeoModuleContext moduleContext,
+    required double density,
+  }) {
+    final horizontal = _horizontal;
+    final draggingId = _draggingId;
+    final placed = neoDragLayout(
+      pills: <NeoPillBox>[
+        for (final placement in visible)
+          NeoPillBox(
+            id: placement.descriptor.id,
+            zone: placement.zone,
+            extent: extents[placement.descriptor.id]!,
+          ),
+      ],
+      mainExtent: horizontal ? size.width : size.height,
+      crossExtent: horizontal ? size.height : size.width,
+      mainPadding: _mainPadding,
+      crossPadding: _crossPadding,
+      gap: 6 * density,
+    );
+
+    final pointer = _pointerLocal;
+    final slots = <_PillSlot>[];
+    final children = <Widget>[];
+    for (final placement in visible) {
+      final id = placement.descriptor.id;
+      final at = placed[id];
+      if (at == null) continue;
+      final key = _keyFor(id);
+      slots.add(_PillSlot(id: id, zone: placement.zone, key: key));
+
+      final held = id == draggingId && pointer != null;
+      final heldCentre = held ? _feedbackCentre(pointer) : null;
+      // `at.main` is a leading edge, `_feedbackCentre` is the pill's middle, so
+      // the held pill subtracts half of itself on both axes to stay centred
+      // under the pointer exactly where `_grabMain`/`_anchorCross` put it.
+      final main = heldCentre == null
+          ? at.main
+          : (horizontal ? heldCentre.dx : heldCentre.dy) - at.extent / 2;
+      final cross = heldCentre == null
+          ? at.cross
+          : (horizontal ? heldCentre.dy : heldCentre.dx) - at.crossExtent / 2;
+      children.add(
+        AnimatedPositioned(
+          key: ValueKey<String>('neo-pill-$id'),
+          // Zero while held: the grab animation already carries that pill, and
+          // letting the layout chase it too would ease everything twice. The
+          // moment the drag ends this returns to the settle duration, which is
+          // what glides the pill from the pointer into its new slot.
+          duration: held ? Duration.zero : Motion.cardSettle,
+          curve: Motion.standard,
+          left: horizontal ? main : cross,
+          top: horizontal ? cross : main,
+          // Positioned by its leading edge with no size along the main axis, so a
+          // pill keeps sizing itself from its content; the measured extent is only
+          // used to work out where the next pill goes.
+          width: horizontal ? null : at.crossExtent,
+          height: horizontal ? at.crossExtent : null,
+          child: _DraggablePill(
+            key: key,
+            id: id,
+            onDragStart: _startDrag,
+            onDragUpdate: _updateDrag,
+            onDragEnd: _endDrag,
+            onDragCancel: _clearDrag,
+            child: _module(context, moduleContext, id),
+          ),
+        ),
+      );
+    }
+    _slots = slots;
+    _scheduleMeasure();
+
+    // The silhouette marking the gap the held pill would drop into.
+    if (draggingId != null && placed[draggingId] != null) {
+      final at = placed[draggingId]!;
+      children.add(
+        AnimatedPositioned(
+          key: ValueKey<String>('neo-ghost-$draggingId'),
+          duration: Motion.cardSettle,
+          curve: Motion.standard,
+          left: horizontal ? at.main : at.cross,
+          top: horizontal ? at.cross : at.main,
+          width: horizontal ? at.extent : at.crossExtent,
+          height: horizontal ? at.crossExtent : at.extent,
+          child: const _DragPlaceholder(),
+        ),
+      );
+    }
+
+    return Stack(key: _stripKey, children: children);
+  }
+
+  /// The fallback layout: zones packed by flex, scrolling if they overflow.
+  ///
+  /// Also the measuring pass — a pill laid out here reports the size its content
+  /// wants, which the explicit layout then positions pills by.
   Widget _buildFlexLayout({
     required BuildContext context,
     required ShellThemeData theme,
     required bool horizontal,
     required double density,
     required NeoModuleContext moduleContext,
-    required List<NeoModuleDescriptor> descriptors,
+    required List<NeoModulePlacement> visible,
   }) {
     final zones = <NeoZone, List<Widget>>{};
     final slots = <_PillSlot>[];
-    for (final placement in _visiblePlacements(
-      widget.state.config,
-      descriptors,
-      moduleContext,
-    )) {
+    for (final placement in visible) {
       final id = placement.descriptor.id;
       final key = _keyFor(id);
       slots.add(_PillSlot(id: id, zone: placement.zone, key: key));
       (zones[placement.zone] ??= <Widget>[]).add(
-        // The GlobalKey sits on the wrapper itself, not on a widget inside it:
-        // that is what lets Flutter re-parent the whole state — the scale
-        // controller and the long-press recogniser — into the drag feedback
-        // instead of recreating them when the bar switches layouts.
         _DraggablePill(
           key: key,
           id: id,
-          dragging: _draggingId == id,
           onDragStart: _startDrag,
           onDragUpdate: _updateDrag,
           onDragEnd: _endDrag,
@@ -663,118 +873,16 @@ class _BarContentState extends State<_BarContent>
       children: [
         Padding(
           padding: horizontal
-              ? const EdgeInsets.symmetric(horizontal: 8, vertical: 5)
-              : const EdgeInsets.symmetric(horizontal: 5, vertical: 8),
+              ? const EdgeInsets.symmetric(
+                  horizontal: _mainPadding,
+                  vertical: _crossPadding,
+                )
+              : const EdgeInsets.symmetric(
+                  horizontal: _crossPadding,
+                  vertical: _mainPadding,
+                ),
           child: layout,
         ),
-      ],
-    );
-  }
-
-  /// The dragging layout: explicit offsets so the reflow can be animated.
-  ///
-  /// The preview is produced by the same pure function that will be persisted on
-  /// drop, so what the user sees while dragging is exactly what they get. The
-  /// dragged pill's slot shows a placeholder and the real pill follows the
-  /// pointer.
-  Widget _buildDragPreview({
-    required BuildContext context,
-    required ShellThemeData theme,
-    required Size size,
-    required NeoModuleContext moduleContext,
-    required List<NeoModuleDescriptor> descriptors,
-    required double density,
-  }) {
-    final horizontal = _horizontal;
-    final draggingId = _draggingId!;
-    final preview = _visiblePlacements(
-      moveModuleToSlot(
-        config: widget.state.config,
-        descriptors: descriptors,
-        moduleId: draggingId,
-        targetZone: _targetZone!,
-        beforeId: _targetBeforeId,
-      ),
-      descriptors,
-      moduleContext,
-    );
-
-    final placed = neoDragLayout(
-      pills: <NeoPillBox>[
-        for (final placement in preview)
-          if (_dragRects[placement.descriptor.id] case final rect?)
-            NeoPillBox(
-              id: placement.descriptor.id,
-              zone: placement.zone,
-              extent: horizontal ? rect.width : rect.height,
-            ),
-      ],
-      mainExtent: horizontal ? size.width : size.height,
-      crossExtent: horizontal ? size.height : size.width,
-      mainPadding: 8,
-      crossPadding: 5,
-      gap: 6 * density,
-    );
-
-    final feedbackSize = _dragRects[draggingId]?.size;
-    final pointer = _pointerLocal;
-    // Recomputed every build so the grab animation can move the pill without any
-    // pointer input.
-    final feedbackCenter = pointer == null ? null : _feedbackCentre(pointer);
-    final feedback = _dragChildren[draggingId];
-    return Stack(
-      key: _stripKey,
-      children: [
-        for (final placement in preview)
-          if (placed[placement.descriptor.id] case final at?)
-            AnimatedPositioned(
-              key: ValueKey<String>('neo-drag-${placement.descriptor.id}'),
-              // Short enough to track the pointer, long enough to read as the
-              // pills making room rather than jumping.
-              duration: Motion.tile,
-              curve: Motion.standard,
-              left: horizontal ? at.main : at.cross,
-              top: horizontal ? at.cross : at.main,
-              width: horizontal ? at.extent : at.crossExtent,
-              height: horizontal ? at.crossExtent : at.extent,
-              child: placement.descriptor.id == draggingId
-                  ? const _DragPlaceholder()
-                  : _dragChildren[placement.descriptor.id] ??
-                        _module(
-                          context,
-                          moduleContext,
-                          placement.descriptor.id,
-                        ),
-            ),
-        if (feedbackSize != null && feedbackCenter != null && feedback != null)
-          Positioned(
-            left: feedbackCenter.dx - feedbackSize.width / 2,
-            top: feedbackCenter.dy - feedbackSize.height / 2,
-            width: feedbackSize.width,
-            height: feedbackSize.height,
-            // The real pill follows the pointer, and it keeps the *same*
-            // GlobalKey the resting layout gave it. That is load-bearing:
-            // Flutter re-parents the keyed element instead of rebuilding it, so
-            // the long-press recogniser driving this drag stays alive. Replacing
-            // the widget that owns a gesture disposes its recogniser, and
-            // disposal never calls onLongPressEnd — the drag would then sit
-            // frozen on its first frame, with no pill draggable, forever.
-            //
-            // IgnorePointer is safe here: an accepted long press receives its
-            // move and up events through the pointer router, not hit testing.
-            child: IgnorePointer(
-              child: _DraggablePill(
-                key: _keyFor(draggingId),
-                id: draggingId,
-                dragging: false,
-                onDragStart: _startDrag,
-                onDragUpdate: _updateDrag,
-                onDragEnd: _endDrag,
-                onDragCancel: _clearDrag,
-                child: feedback,
-              ),
-            ),
-          ),
       ],
     );
   }
@@ -792,7 +900,6 @@ class _BarContentState extends State<_BarContent>
 class _DraggablePill extends StatefulWidget {
   const _DraggablePill({
     required this.id,
-    required this.dragging,
     required this.onDragStart,
     required this.onDragUpdate,
     required this.onDragEnd,
@@ -802,7 +909,6 @@ class _DraggablePill extends StatefulWidget {
   });
 
   final String id;
-  final bool dragging;
   final void Function(String id, Offset globalPosition) onDragStart;
   final ValueChanged<Offset> onDragUpdate;
   final VoidCallback onDragEnd;
@@ -910,19 +1016,7 @@ class _DraggablePillState extends State<_DraggablePill>
           animation: _scale,
           builder: (context, child) =>
               Transform.scale(scale: _scale.value, child: child),
-          // While the bar is still on its resting layout the dragged pill keeps
-          // its slot but paints nothing, so the bar does not reflow under the
-          // pointer. Deliberately not an Opacity fade: a partly transparent layer
-          // around ShellBackdropBlur makes the glass sample that layer instead of
-          // the wallpaper. At opacity 0 Flutter skips painting the child
-          // entirely, so no layer is involved.
-          child: Visibility(
-            visible: !widget.dragging,
-            maintainSize: true,
-            maintainState: true,
-            maintainAnimation: true,
-            child: widget.child,
-          ),
+          child: widget.child,
         ),
       ),
     );
