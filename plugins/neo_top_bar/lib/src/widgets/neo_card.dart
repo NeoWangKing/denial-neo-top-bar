@@ -92,9 +92,58 @@ class NeoCardButton extends StatefulWidget {
   State<NeoCardButton> createState() => _NeoCardButtonState();
 }
 
-class _NeoCardButtonState extends State<NeoCardButton> {
+class _NeoCardButtonState extends State<NeoCardButton>
+    with SingleTickerProviderStateMixin {
+  /// A press pops the pill slightly. Kept small because the strip clips: at 1.04
+  /// a 45px-tall pill grows well under a pixel per edge, so nothing is visibly
+  /// cut off.
+  static const double _pressedScale = 1.04;
+
+  /// The controller's value *is* the scale, so the spring drives it directly.
+  ///
+  /// Unbounded on purpose: [Motion.bouncy] overshoots on the way back, which is
+  /// the rebound. A plain [Transform] is used rather than [ShellFadeScale]
+  /// because a fade wrapper would put a layer around the pill's
+  /// [ShellBackdropBlur], which then samples that layer instead of the wallpaper.
+  late final AnimationController _scale = AnimationController.unbounded(
+    vsync: this,
+    value: 1,
+  );
+
   bool _hovered = false;
   bool _focused = false;
+
+  @override
+  void dispose() {
+    _scale.dispose();
+    super.dispose();
+  }
+
+  void _press() {
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _scale.value = _pressedScale;
+      return;
+    }
+    springTo(
+      _scale,
+      _pressedScale,
+      spring: Motion.snappy,
+      telemetryLabel: 'neo_top_bar.pill_press',
+    );
+  }
+
+  void _release() {
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _scale.value = 1;
+      return;
+    }
+    springTo(
+      _scale,
+      1,
+      spring: Motion.bouncy,
+      telemetryLabel: 'neo_top_bar.pill_release',
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -114,11 +163,17 @@ class _NeoCardButtonState extends State<NeoCardButton> {
           vertical: widget.horizontal ? 0 : 12 * widget.density,
         );
 
+    // Animated rather than swapped: the highlight used to land in one frame,
+    // which is what made hovering feel abrupt. Only the decoration animates, so
+    // no layer is created and the blur keeps sampling the scene.
     Widget content = ShellBackdropBlur(
       blur: theme.effectiveCardOpacity < 1.0,
       borderRadius: radius,
       blendMode: BlendMode.srcOver,
-      child: DecoratedBox(
+      child: AnimatedContainer(
+        duration: Motion.cardSettle,
+        curve: Motion.standard,
+        padding: resolvedPadding,
         decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
@@ -130,7 +185,7 @@ class _NeoCardButtonState extends State<NeoCardButton> {
               ? Border.all(color: theme.accent.withValues(alpha: 0.78))
               : null,
         ),
-        child: Padding(padding: resolvedPadding, child: widget.child),
+        child: widget.child,
       ),
     );
 
@@ -146,6 +201,9 @@ class _NeoCardButtonState extends State<NeoCardButton> {
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: widget.onPressed,
+            onTapDown: (_) => _press(),
+            onTapUp: (_) => _release(),
+            onTapCancel: _release,
             child: FocusableActionDetector(
               onShowFocusHighlight: (value) => setState(() => _focused = value),
               child: content,
@@ -158,6 +216,11 @@ class _NeoCardButtonState extends State<NeoCardButton> {
     if (widget.tooltip case final tooltip?) {
       content = Tooltip(message: tooltip, child: content);
     }
-    return content;
+    return AnimatedBuilder(
+      animation: _scale,
+      builder: (context, child) =>
+          Transform.scale(scale: _scale.value, child: child),
+      child: content,
+    );
   }
 }

@@ -605,7 +605,19 @@ class _DraggablePill extends StatelessWidget {
               ? Border.all(color: theme.accent, width: 2)
               : const Border.fromBorderSide(BorderSide.none),
         ),
-        child: Opacity(opacity: dragging ? 0.35 : 1, child: child),
+        // The lifted pill keeps its slot — so the rest of the bar does not
+        // reflow under the pointer and the drop target stays stable — but paints
+        // nothing. Deliberately not an Opacity fade: a partly transparent layer
+        // around ShellBackdropBlur makes the glass sample that layer instead of
+        // the wallpaper, which is a defect the SDK documents. At opacity 0
+        // Flutter skips painting the child entirely, so no layer is involved.
+        child: Visibility(
+          visible: !dragging,
+          maintainSize: true,
+          maintainState: true,
+          maintainAnimation: true,
+          child: child,
+        ),
       ),
     );
   }

@@ -273,6 +273,33 @@ lib/
    托盘胶囊里的图标由宿主渲染、自带手势，**可能**抢走长按，那种情况下用面板里的 ↑ ↓。
 4. 面板内一次最多渲染 50 条通知（避免无上限增长）。
 
+## 动效
+
+用 Denial 自己的动效工具，不自己写曲线：
+
+| 场景 | 做法 | 为什么 |
+|---|---|---|
+| 点击胶囊 | `springTo(_scale, 1.04, spring: Motion.snappy)` 压下，抬起时 `springTo(_scale, 1.0, spring: Motion.bouncy)` 回弹 | `Motion.snappy` 是官方给"卡片、开关这类小而灵敏的元素"的弹簧；`bouncy` 允许一点过冲，就是回弹感 |
+| 悬停/聚焦高亮 | `AnimatedContainer(duration: Motion.cardSettle, curve: Motion.standard)` | 原来是一帧内直接换色，所以显得"跳"。只动 `BoxDecoration`，不产生图层 |
+| 拖动时被拿起的胶囊 | `Visibility(maintainSize: true)` —— **不画**，而不是半透明 | 见下 |
+
+### 缩放绝不能包 `Opacity` 或 `ShellFadeScale`
+
+Denial 的 `ShellFadeScale` 文档写得很明确：**内部会采样场景的内容
+（`ShellBackdropBlur`、玻璃、窗口表面）不能被它包住**，否则采样到的是那个图层而不是壁纸。
+每个胶囊里都有 `ShellBackdropBlur`，所以：
+
+- 点击的放大用**纯 `Transform.scale`**——变换本身不建图层，玻璃照常采样真实背景。
+- 拖动时"被拿起的胶囊"原来用的是 `Opacity(opacity: 0.35)`，**这正好违反了上面那条**
+  （拖动时它的玻璃背景是坏的）。现在改成 `Visibility(maintainSize: true)`：
+  槽位尺寸不变（栏不会在指针下重排、落点计算稳定），但整个子树**不绘制**——
+  `Opacity` 在 0 时不建图层、直接跳过绘制，所以也没有采样问题。
+
+### 尊重"减少动画"
+
+`_press` / `_release` 会先查 `MediaQuery.disableAnimationsOf(context)`，
+用户在 Denial 里关掉动画时直接落到目标值，不做弹簧。
+
 ## 弹出面板的写法（踩过的坑）
 
 日历、通知、组件设置三个面板都走 `NeoPopupSurface`，它有两种模式：
