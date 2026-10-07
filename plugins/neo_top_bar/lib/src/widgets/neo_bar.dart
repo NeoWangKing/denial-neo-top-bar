@@ -6,7 +6,7 @@ import 'dart:io' show File, FileSystemException;
 import 'package:denial_flutter_sdk/panels.dart';
 import 'package:denial_flutter_sdk/services.dart';
 import 'package:denial_flutter_sdk/theme.dart';
-import 'package:flutter/gestures.dart' show kSecondaryButton;
+import 'package:flutter/gestures.dart' show kPrimaryButton, kSecondaryButton;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -452,18 +452,19 @@ class _BarContentState extends State<_BarContent> {
       final key = _keyFor(id);
       slots.add(_PillSlot(id: id, zone: placement.zone, key: key));
       (zones[placement.zone] ??= <Widget>[]).add(
-        KeyedSubtree(
-          key: ValueKey<String>('neo-module-$id'),
-          child: _DraggablePill(
-            slotKey: key,
-            id: id,
-            dragging: _draggingId == id,
-            onDragStart: _startDrag,
-            onDragUpdate: _updateDrag,
-            onDragEnd: _endDrag,
-            onDragCancel: _clearDrag,
-            child: _module(context, moduleContext, id),
-          ),
+        // The GlobalKey sits on the wrapper itself, not on a widget inside it:
+        // that is what lets Flutter re-parent the whole state — the scale
+        // controller and the long-press recogniser — into the drag feedback
+        // instead of recreating them when the bar switches layouts.
+        _DraggablePill(
+          key: key,
+          id: id,
+          dragging: _draggingId == id,
+          onDragStart: _startDrag,
+          onDragUpdate: _updateDrag,
+          onDragEnd: _endDrag,
+          onDragCancel: _clearDrag,
+          child: _module(context, moduleContext, id),
         ),
       );
     }
@@ -657,7 +658,7 @@ class _BarContentState extends State<_BarContent> {
             // move and up events through the pointer router, not hit testing.
             child: IgnorePointer(
               child: _DraggablePill(
-                slotKey: _keyFor(draggingId),
+                key: _keyFor(draggingId),
                 id: draggingId,
                 dragging: false,
                 onDragStart: _startDrag,
@@ -673,13 +674,17 @@ class _BarContentState extends State<_BarContent> {
   }
 }
 
-/// Wraps one pill with the long-press drag gesture.
+/// Wraps one pill with the press feedback and the long-press drag gesture.
 ///
-/// A long press, not an immediate pan: an immediate drag would swallow the tap
-/// every pill already answers to.
-class _DraggablePill extends StatelessWidget {
+/// The press feedback lives here rather than inside the card so that it belongs
+/// to the **pill**: every module gets it, whether its card is interactive or not,
+/// and pressing any control inside a pill grows that pill instead of just the
+/// control. One language for the whole bar.
+///
+/// A long press grows the pill further and holds it there, so a pill reads as
+/// lifted for as long as it is being dragged.
+class _DraggablePill extends StatefulWidget {
   const _DraggablePill({
-    required this.slotKey,
     required this.id,
     required this.dragging,
     required this.onDragStart,
@@ -687,9 +692,9 @@ class _DraggablePill extends StatelessWidget {
     required this.onDragEnd,
     required this.onDragCancel,
     required this.child,
+    super.key,
   });
 
-  final GlobalKey slotKey;
   final String id;
   final bool dragging;
   final void Function(String id, Offset globalPosition) onDragStart;
@@ -699,14 +704,106 @@ class _DraggablePill extends StatelessWidget {
   final Widget child;
 
   @override
+  State<_DraggablePill> createState() => _DraggablePillState();
+}
+
+class _DraggablePillState extends State<_DraggablePill>
+    with SingleTickerProviderStateMixin {
+  /// A press grows the pill a little; a long press grows it further, as if
+  /// lifting it off the bar. Both are small because the strip clips: at 1.08 a
+  /// 45px-tall pill grows under two pixels per edge.
+  static const double _pressedScale = 1.03;
+  static const double _liftedScale = 1.08;
+
+  /// The controller's value *is* the scale, so a spring drives it directly.
+  ///
+  /// Unbounded on purpose: [Motion.bouncy] overshoots on the way back, which is
+  /// the rebound. A plain [Transform] is used rather than [ShellFadeScale]
+  /// because a fade wrapper would put a layer around the pill's
+  /// [ShellBackdropBlur], which then samples that layer instead of the wallpaper.
+  late final AnimationController _scale = AnimationController.unbounded(
+    vsync: this,
+    value: 1,
+  );
+
+  bool _pressed = false;
+
+  @override
+  void dispose() {
+    _scale.dispose();
+    super.dispose();
+  }
+
+  void _growTo(double target, SpringDescription spring, String label) {
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _scale.value = target;
+      return;
+    }
+    springTo(_scale, target, spring: spring, telemetryLabel: label);
+  }
+
+  void _handleDown(PointerDownEvent event) {
+    if (event.buttons != kPrimaryButton) return;
+    _pressed = true;
+    _growTo(_pressedScale, Motion.snappy, 'neo_top_bar.pill_press');
+  }
+
+  void _handleUp() {
+    if (!_pressed) return;
+    _pressed = false;
+    _growTo(1, Motion.bouncy, 'neo_top_bar.pill_release');
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      key: slotKey,
-      onLongPressStart: (details) => onDragStart(id, details.globalPosition),
-      onLongPressMoveUpdate: (details) => onDragUpdate(details.globalPosition),
-      onLongPressEnd: (_) => onDragEnd(),
-      onLongPressCancel: onDragCancel,
-      child: child,
+    return Listener(
+      // A raw Listener, not the tap callbacks: with the long-press recogniser
+      // competing for the pointer, a tap recogniser does not fire onTapDown until
+      // it wins the arena or its 100ms deadline expires, and a quick click
+      // releases in the same frame — the grow would start and be cancelled
+      // before it moved. A Listener does not join the arena and fires on the
+      // down event itself. It also consumes nothing, so taps still land.
+      onPointerDown: _handleDown,
+      onPointerUp: (_) => _handleUp(),
+      onPointerCancel: (_) => _handleUp(),
+      child: GestureDetector(
+        // Long-press opens the arena's other side: a fast drag rejects it (the
+        // 18px slop), so flicking across the bar never starts a reorder.
+        onLongPressStart: (details) {
+          _growTo(_liftedScale, Motion.gentle, 'neo_top_bar.pill_lift');
+          widget.onDragStart(widget.id, details.globalPosition);
+        },
+        onLongPressMoveUpdate: (details) =>
+            widget.onDragUpdate(details.globalPosition),
+        onLongPressEnd: (_) {
+          _pressed = false;
+          _growTo(1, Motion.bouncy, 'neo_top_bar.pill_release');
+          widget.onDragEnd();
+        },
+        onLongPressCancel: () {
+          _pressed = false;
+          _growTo(1, Motion.bouncy, 'neo_top_bar.pill_release');
+          widget.onDragCancel();
+        },
+        child: AnimatedBuilder(
+          animation: _scale,
+          builder: (context, child) =>
+              Transform.scale(scale: _scale.value, child: child),
+          // While the bar is still on its resting layout the dragged pill keeps
+          // its slot but paints nothing, so the bar does not reflow under the
+          // pointer. Deliberately not an Opacity fade: a partly transparent layer
+          // around ShellBackdropBlur makes the glass sample that layer instead of
+          // the wallpaper. At opacity 0 Flutter skips painting the child
+          // entirely, so no layer is involved.
+          child: Visibility(
+            visible: !widget.dragging,
+            maintainSize: true,
+            maintainState: true,
+            maintainAnimation: true,
+            child: widget.child,
+          ),
+        ),
+      ),
     );
   }
 }

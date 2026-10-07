@@ -315,7 +315,8 @@ Flutter 在手势识别器 `dispose` 时**不会调用 `onLongPressEnd` / `onLon
 
 | 场景 | 做法 | 为什么 |
 |---|---|---|
-| 点击胶囊 | 按下立刻 `springTo(_scale, 1.05, spring: Motion.snappy)`，抬起 `springTo(_scale, 1.0, spring: Motion.bouncy)` 回弹 | `Motion.snappy` 是官方给"卡片、开关这类小而灵敏的元素"的弹簧；`bouncy` 允许一点过冲，就是回弹感 |
+| 按下任一胶囊 | 立刻 `springTo(_scale, 1.03, spring: Motion.snappy)`，抬起 `springTo(_scale, 1.0, spring: Motion.bouncy)` 回弹 | 反馈属于**胶囊**而不是里面的控件，所以点胶囊里任何一个控件都是整颗胶囊反应 |
+| 长按（准备拖动） | 继续长到 `1.08`，用 `Motion.gentle`，**并保持在整个拖动过程中** | 和按下同一条"变大"语言，只是幅度更大、更缓，读起来就是"被拿起来了" |
 | 悬停/聚焦高亮 | `AnimatedContainer(duration: Motion.cardSettle, curve: Motion.standard)` | 原来是一帧内直接换色，所以显得"跳"。只动 `BoxDecoration`，不产生图层 |
 | 拖动时被拿起的胶囊 | `Visibility(maintainSize: true)` —— **不画**，而不是半透明 | 见下 |
 
@@ -337,6 +338,20 @@ Flutter 在手势识别器 `dispose` 时**不会调用 `onLongPressEnd` / `onLon
 改用裸 `Listener`（`onPointerDown` / `onPointerUp` / `onPointerCancel`）：它**不参与
 竞技场**，在按下事件的当帧就回调；同时它也不消费事件，所以点击照常传给胶囊。
 `PointerUpEvent.buttons` 恒为 0（按键已释放），所以要用一个 `_pressed` 标志来配对。
+
+### 放大必须挂在胶囊层，不能挂在卡片里
+
+最初我把放大写在 `NeoCardButton` 里。问题：那只是个**可交互卡片**的实现，只有用它构建的
+胶囊（启动器、时钟、电池、通知）会放大；用 `NeoCard` 的那些（媒体、工作区、托盘、
+CPU/GPU）**完全没有反馈**。
+
+正确位置是 `_DraggablePill`——它包裹**每一个**胶囊。放在这一层还顺带解决了三件事：
+
+1. 点胶囊里**任何**控件（媒体按钮、窗口图标、工作区圆点）都是整颗胶囊反馈，
+   而不是只有那个控件
+2. 长按可以用同一条语言继续长到"拿起"的幅度
+3. `_DraggablePill` 的 GlobalKey 让缩放状态**跟着 element 一起搬迁**到拖动反馈上，
+   所以拖起来时胶囊本来就是"拿起"的尺寸（见上一节）
 
 ### 缩放绝不能包 `Opacity` 或 `ShellFadeScale`
 
