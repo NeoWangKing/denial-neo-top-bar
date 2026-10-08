@@ -161,6 +161,8 @@ class _ClockSettings extends StatelessWidget {
               NeoSettingRow(
                 label: s.clockDateFormat,
                 description: s.clockDateFormatDescription(options.dateFormat),
+                // Four chips need the row's whole width once the card is a popup.
+                fit: NeoSettingRowFit.under,
                 child: NeoSettingChips<NeoClockDateFormat>(
                   values: <NeoClockDateFormat, String>{
                     for (final format in neoClockDateFormatOrder)

@@ -449,6 +449,8 @@ class _LauncherSettingsState extends ConsumerState<_LauncherSettings> {
             NeoSettingRow(
               label: s.launcherIconQuestion,
               description: s.launcherIconDescription(options.effectiveIcon),
+              // Four chips need the row's whole width once the card is a popup.
+              fit: NeoSettingRowFit.under,
               child: NeoSettingChips<NeoLauncherIcon>(
                 values: <NeoLauncherIcon, String>{
                   for (final icon in neoLauncherIconOrder)

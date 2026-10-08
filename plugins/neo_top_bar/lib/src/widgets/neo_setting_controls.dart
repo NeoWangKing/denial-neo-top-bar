@@ -11,29 +11,45 @@ import 'package:flutter/material.dart';
 
 /// Below this width a row stops putting its control beside the text.
 ///
-/// The board's card gives a row about 700px, where the two-column shape reads
-/// well; a pill's own settings card is one small popup, about 330px. In between
-/// the two, a chip row beside a label squeezes the label to one character per
-/// line — which is what the first version of the pointer card looked like.
+/// The board's card gives a row about 740px, where the two-column shape reads
+/// well; a pill's own settings card is one small popup, about 390px. In between
+/// the two, a control that wants real width squeezes the label to one character
+/// per line — which is what the first version of the pointer card looked like.
 const double _inlineRowMinWidth = 460;
 
-/// Label and description on the left, a control on the right.
+/// What a row's control does when the row is too narrow for two columns.
 ///
-/// Switches are the exception to the narrow rule: a 44px switch always fits
-/// beside the text, and moving it below the text only makes the row taller. Every
-/// other control drops to its own line when the row is narrow, so it gets the
-/// full width to lay out in.
+/// Stated by the row rather than guessed from the control: an earlier version
+/// checked the child's type for "is this a switch?", which silently stopped
+/// working the moment a row wrapped its switch in a `Builder` — the control
+/// centre's rows then stacked while every other switch row stayed inline, and the
+/// card looked like two different designs.
+enum NeoSettingRowFit {
+  /// Keep the control beside the text. Right for a switch or a slider: they are
+  /// small, and a switch on the right of its label is the shape people expect.
+  beside,
+
+  /// Drop the control below the text, where it gets the full row width. Right
+  /// for a row of chips, which needs the width to stay on one line.
+  under,
+}
+
+/// Label and description on the left, a control on the right.
 class NeoSettingRow extends StatelessWidget {
   const NeoSettingRow({
     required this.label,
     required this.description,
     required this.child,
+    this.fit = NeoSettingRowFit.beside,
     super.key,
   });
 
   final String label;
   final String description;
   final Widget child;
+
+  /// How the control behaves in a narrow row. See [NeoSettingRowFit].
+  final NeoSettingRowFit fit;
 
   @override
   Widget build(BuildContext context) {
@@ -58,8 +74,8 @@ class NeoSettingRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 5),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          if (constraints.maxWidth < _inlineRowMinWidth &&
-              child is! NeoSettingToggle) {
+          if (fit == NeoSettingRowFit.under &&
+              constraints.maxWidth < _inlineRowMinWidth) {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [

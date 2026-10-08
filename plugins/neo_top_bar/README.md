@@ -538,6 +538,12 @@ _grab       0 → 1，360ms + Motion.md3Emphasized
 - **toggle / 描述行的样式只有一个来源**：`neo_setting_controls.dart` 里的
   `NeoSettingRow` / `NeoSettingToggle`，面板和模块设置都用它，免得同一个卡片里
   出现三种长得略不一样的开关。
+- **窄行怎么排，由行自己声明，不靠猜**：`NeoSettingRow.fit` 只有两个值——
+  `beside`（默认，开关/滑条这类小控件留在右边）和 `under`（一排 chips 这种要宽度的，
+  在窄卡片里落到文字下面拿整行宽度）。**第一个版本是「看 child 是不是
+  `NeoSettingToggle`」来决定的，控制中心那几行把开关包在 `Builder` 里，于是同一张卡里
+  上面几行堆叠、下面几行不堆叠**——看起来像两套设计。类型判断被换成显式声明，
+  以后加一排 chips 记得写 `fit: NeoSettingRowFit.under`。
 - **只有设置、没有开关的模块也会留下配置条目**：`withEnabled` / `withZone` / `withOption`
   三个方法都会带上其它字段。以前「开关一个模块」会顺手把它的**分区选择丢掉**，
   现在这一并修了（有单测钉住）。
