@@ -6,7 +6,7 @@ import 'dart:io' show File, FileSystemException;
 import 'package:denial_flutter_sdk/panels.dart';
 import 'package:denial_flutter_sdk/services.dart';
 import 'package:denial_flutter_sdk/theme.dart';
-import 'package:flutter/gestures.dart' show kPrimaryButton, kSecondaryButton;
+import 'package:flutter/gestures.dart' show kPrimaryButton;
 import 'package:flutter/material.dart';
 // `_RenderPillSizeReporter` is a render object, and `widgets.dart` re-exports
 // only a slice of the rendering library.
@@ -23,6 +23,7 @@ import '../core/module_registry.dart';
 import '../core/preferences.dart';
 import '../core/settings_requests.dart';
 import 'module_settings_panel.dart';
+import 'neo_bar_menu.dart';
 
 /// Holds the process-wide preferences store.
 ///
@@ -480,18 +481,25 @@ class _BarContentState extends State<_BarContent>
     _targetBeforeId = beforeId;
   }
 
-  /// Whether [globalPosition] lands on one of the laid-out pills.
+  /// Opens one pill's settings card at [position], which is where the user
+  /// right-clicked.
   ///
-  /// Reuses the same rectangles the drag measures, so there is no second source
-  /// of truth for where a pill is.
-  bool _isOverPill(Offset globalPosition) {
-    for (final slot in _slots) {
-      final box = slot.key.currentContext?.findRenderObject();
-      if (box is! RenderBox || !box.attached || !box.hasSize) continue;
-      final rect = box.localToGlobal(Offset.zero) & box.size;
-      if (rect.contains(globalPosition)) return true;
-    }
-    return false;
+  /// The placement is resolved from the current configuration rather than carried
+  /// on the slot, so the card reads what is true now: the pill may have been
+  /// reordered or re-configured by another surface since the layout was built.
+  void _openPillSettings(
+    BuildContext context,
+    String instanceId,
+    Offset position,
+  ) {
+    openNeoPillSettings(
+      context: context,
+      state: widget.state,
+      services: widget.services,
+      monitorId: widget.monitorId,
+      instanceId: instanceId,
+      position: position,
+    );
   }
 
   Future<void> _endDrag() async {
@@ -535,96 +543,91 @@ class _BarContentState extends State<_BarContent>
     final descriptors = NeoTopBarModules.descriptors;
     final moduleContext = _moduleContext;
 
-    return Listener(
-      // Without `opaque` the strip only counts as hit where a child is, because
-      // Listener defaults to HitTestBehavior.deferToChild. The settings card
-      // opens on right-clicks that deliberately miss every pill, so with the
-      // default it could never fire at all: over a pill it is skipped on purpose,
-      // and over the empty stretches between zones there is no child to hit.
-      // `opaque` makes the strip itself a hit target while still delivering
-      // events to its children, so the tray keeps its own right-click menus.
+    return GestureDetector(
+      // The blank strip's own menu. A **gesture recogniser**, not a raw
+      // `Listener`, so the arena decides who gets the secondary button: a pill is
+      // wrapped in a recogniser of its own, and a tray icon or a control-centre
+      // glyph sits deeper still, so whatever the pointer is actually over wins and
+      // this handler only runs on genuinely empty bar. That is what keeps
+      // "right-click the pill" and "right-click the tray icon inside it" apart
+      // without hit-testing anything here.
+      //
+      // `opaque` keeps the empty stretches between zones hit-testable: without it
+      // the strip only counts as hit where a child is, and a right-click a few
+      // pixels away from the last pill would fall through to the wallpaper.
       behavior: HitTestBehavior.opaque,
-      // Safety net for the drag state. The long-press callbacks normally end a
-      // drag, but if the pointer is ever released without reaching them the bar
-      // would stay in the preview layout, which has no long-press handlers — so
-      // nothing would be draggable again until the shell restarted.
-      onPointerUp: (_) => _endDragIfActive(),
-      onPointerCancel: (_) => _endDragIfActive(),
-      onPointerDown: (event) {
-        if (event.buttons != kSecondaryButton) return;
-        // A raw Listener does not compete in the gesture arena, so anything the
-        // pills handle still runs. That is exactly why right-click must be
-        // ignored over a pill: the status tray renders host-side items whose
-        // context menus are opened with the secondary button, and opening this
-        // card as well would fight them.
-        if (_isOverPill(event.position)) return;
-        // The settings card opens centered rather than at the pointer: it is a
-        // configuration surface with many rows, not a context menu, so the click
-        // position carries no meaning for it.
-        openModuleSettingsPanel(
-          context: context,
-          state: widget.state,
-          services: widget.services,
-          monitorId: widget.monitorId,
-        );
-      },
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final size = constraints.biggest;
-          final measuredCross =
-              (horizontal ? size.height : size.width) - _crossPadding * 2;
-          _pillCrossExtent = measuredCross > 0
-              ? measuredCross
-              : _pillCrossExtent;
-          // While dragging, the order on screen is a preview of the drop; the
-          // same pure function that will be persisted produces it.
-          final draggingId = _draggingId;
-          final targetZone = _targetZone;
-          final config = draggingId != null && targetZone != null
-              ? moveModuleToSlot(
-                  config: widget.state.config,
-                  descriptors: descriptors,
-                  instanceId: draggingId,
-                  targetZone: targetZone,
-                  beforeId: _targetBeforeId,
-                )
-              : widget.state.config;
-          final visible = _visiblePlacements(
-            config,
-            descriptors,
-            moduleContext,
-          );
+      onSecondaryTapUp: (details) => openNeoBarMenu(
+        context: context,
+        services: widget.services,
+        monitorId: widget.monitorId,
+        position: details.globalPosition,
+      ),
+      child: Listener(
+        behavior: HitTestBehavior.opaque,
+        // Safety net for the drag state. The long-press callbacks normally end a
+        // drag, but if the pointer is ever released without reaching them the bar
+        // would stay in the preview layout, which has no long-press handlers — so
+        // nothing would be draggable again until the shell restarted.
+        onPointerUp: (_) => _endDragIfActive(),
+        onPointerCancel: (_) => _endDragIfActive(),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final size = constraints.biggest;
+            final measuredCross =
+                (horizontal ? size.height : size.width) - _crossPadding * 2;
+            _pillCrossExtent = measuredCross > 0
+                ? measuredCross
+                : _pillCrossExtent;
+            // While dragging, the order on screen is a preview of the drop; the
+            // same pure function that will be persisted produces it.
+            final draggingId = _draggingId;
+            final targetZone = _targetZone;
+            final config = draggingId != null && targetZone != null
+                ? moveModuleToSlot(
+                    config: widget.state.config,
+                    descriptors: descriptors,
+                    instanceId: draggingId,
+                    targetZone: targetZone,
+                    beforeId: _targetBeforeId,
+                  )
+                : widget.state.config;
+            final visible = _visiblePlacements(
+              config,
+              descriptors,
+              moduleContext,
+            );
 
-          // Explicit positions whenever they are known, so that *any* change of
-          // order animates — a drag, or a reorder from the settings card. The
-          // flex layout is the fallback for the first frame and for a bar whose
-          // content is too wide to place, where scrolling matters more than
-          // animation.
-          final boxes = _pillBoxes(visible);
-          if (boxes != null &&
-              neoPillsFit(
-                pills: boxes,
-                mainExtent: horizontal ? size.width : size.height,
-                mainPadding: _mainPadding,
-                gap: _gap(density),
-              )) {
-            return _buildPositionedLayout(
+            // Explicit positions whenever they are known, so that *any* change of
+            // order animates — a drag, or a reorder from the settings card. The
+            // flex layout is the fallback for the first frame and for a bar whose
+            // content is too wide to place, where scrolling matters more than
+            // animation.
+            final boxes = _pillBoxes(visible);
+            if (boxes != null &&
+                neoPillsFit(
+                  pills: boxes,
+                  mainExtent: horizontal ? size.width : size.height,
+                  mainPadding: _mainPadding,
+                  gap: _gap(density),
+                )) {
+              return _buildPositionedLayout(
+                context: context,
+                theme: theme,
+                size: size,
+                boxes: boxes,
+                visible: visible,
+                density: density,
+              );
+            }
+            return _buildFlexLayout(
               context: context,
               theme: theme,
-              size: size,
-              boxes: boxes,
-              visible: visible,
+              horizontal: horizontal,
               density: density,
+              visible: visible,
             );
-          }
-          return _buildFlexLayout(
-            context: context,
-            theme: theme,
-            horizontal: horizontal,
-            density: density,
-            visible: visible,
-          );
-        },
+          },
+        ),
       ),
     );
   }
@@ -773,6 +776,8 @@ class _BarContentState extends State<_BarContent>
             onDragUpdate: _updateDrag,
             onDragEnd: _endDrag,
             onDragCancel: _clearDrag,
+            onSecondaryTap: (position) =>
+                _openPillSettings(context, id, position),
             child: _module(context, id, placement.moduleId),
           ),
         ),
@@ -831,6 +836,8 @@ class _BarContentState extends State<_BarContent>
             onDragUpdate: _updateDrag,
             onDragEnd: _endDrag,
             onDragCancel: _clearDrag,
+            onSecondaryTap: (position) =>
+                _openPillSettings(context, id, position),
             child: _module(context, id, placement.moduleId),
           ),
         ),
@@ -959,6 +966,7 @@ class _DraggablePill extends StatefulWidget {
     required this.onDragUpdate,
     required this.onDragEnd,
     required this.onDragCancel,
+    required this.onSecondaryTap,
     required this.child,
     super.key,
   });
@@ -968,6 +976,13 @@ class _DraggablePill extends StatefulWidget {
   final ValueChanged<Offset> onDragUpdate;
   final VoidCallback onDragEnd;
   final VoidCallback onDragCancel;
+
+  /// Right-click on the pill itself: opens this pill's settings at the pointer.
+  ///
+  /// Only reachable when nothing inside the pill claimed the secondary button —
+  /// the tray's own icons and the control-centre glyphs are deeper recognisers and
+  /// win the arena first, which is exactly the separation that is wanted.
+  final ValueChanged<Offset> onSecondaryTap;
   final Widget child;
 
   @override
@@ -1049,6 +1064,18 @@ class _DraggablePillState extends State<_DraggablePill>
       onPointerUp: (_) => _handleUp(),
       onPointerCancel: (_) => _handleUp(),
       child: GestureDetector(
+        // Right-click belongs to the pill: the settings for *this* pill open at
+        // the pointer. Anything interactive inside the pill — a tray icon, a
+        // control-centre glyph — is a deeper recogniser, so it takes the secondary
+        // button first and this never fires. Left clicks still fall through to the
+        // card, which owns the primary tap.
+        // `onSecondaryTapUp`, not `...Down`: a nested pair of tap recognisers
+        // both fire their *down* callback once the 100ms deadline passes, so a
+        // held right-click on a pill would open both this card and whatever the
+        // inner target did. The up callback is guarded by the arena win, so
+        // exactly one handler — the innermost — ever runs.
+        onSecondaryTapUp: (details) =>
+            widget.onSecondaryTap(details.globalPosition),
         // Long-press opens the arena's other side: a fast drag rejects it (the
         // 18px slop), so flicking across the bar never starts a reorder.
         onLongPressStart: (details) {

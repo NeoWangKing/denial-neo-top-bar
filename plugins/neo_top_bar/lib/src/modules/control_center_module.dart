@@ -14,7 +14,6 @@ library;
 
 import 'package:denial_flutter_sdk/state.dart';
 import 'package:denial_flutter_sdk/theme.dart';
-import 'package:flutter/gestures.dart' show kSecondaryButton;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -388,14 +387,14 @@ class _StatusGlyphState extends State<_StatusGlyph> {
             cursor: SystemMouseCursors.click,
             onEnter: (_) => setState(() => _hovered = true),
             onExit: (_) => setState(() => _hovered = false),
-            child: Listener(
-              // A raw `Listener`, not a gesture recogniser: the pill's own
-              // `NeoCardButton` owns the tap, and a recogniser here would have to
-              // win an arena against it to see the secondary button at all.
-              onPointerDown: (event) {
-                if (event.buttons != kSecondaryButton) return;
-                widget.onSecondary?.call();
-              },
+            child: GestureDetector(
+              // A gesture recogniser rather than a raw `Listener`, so the arena
+              // decides: this glyph sits deeper in the tree than the pill, so a
+              // right-click here runs the glyph's own action and the pill's
+              // settings card — which listens for the same button — stays closed.
+              // A raw listener would fire *as well as* the pill's handler, which
+              // is exactly the "one right-click, two things happened" bug.
+              onSecondaryTapDown: (_) => widget.onSecondary?.call(),
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 // Left clicks fall through to the pill as well, so tapping a

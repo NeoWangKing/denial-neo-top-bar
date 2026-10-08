@@ -490,10 +490,9 @@ class _ModuleCardState extends State<_ModuleCard> {
                       ),
                       if (_expanded) ...[
                         const SizedBox(height: 10),
-                        _ExpandedSettings(
+                        NeoExpandedModuleSettings(
                           placement: widget.placement,
                           state: widget.state,
-                          module: module,
                           services: widget.services,
                           monitorId: widget.monitorId,
                         ),
@@ -511,25 +510,79 @@ class _ModuleCardState extends State<_ModuleCard> {
 }
 
 /// The settings a module contributes, inside its own card.
-class _ExpandedSettings extends StatelessWidget {
-  const _ExpandedSettings({
+/// The settings one module instance owns, as a well inside whatever holds it.
+///
+/// Shared by the board's expanded card and by the per-pill card that opens at
+/// the pointer, so a setting can never exist in one of them but not the other.
+/// The well is what makes it read as a nested surface; a popup that already has
+/// its own card can turn it off with [inset].
+class NeoExpandedModuleSettings extends StatelessWidget {
+  const NeoExpandedModuleSettings({
     required this.placement,
     required this.state,
-    required this.module,
     required this.services,
     required this.monitorId,
+    this.showTitle = true,
+    this.inset = true,
+    super.key,
   });
 
   final NeoModulePlacement placement;
   final NeoTopBarConfigState state;
-  final NeoModule? module;
   final ShellServices services;
   final int monitorId;
+
+  /// Whether to write the `「X」设置` caption above the rows. A popup that
+  /// already names the module in its own header turns this off.
+  final bool showTitle;
+
+  /// Whether to draw the inset well and its border.
+  final bool inset;
 
   @override
   Widget build(BuildContext context) {
     final theme = ShellTheme.of(context);
     final s = context.neoStrings;
+    final module = NeoTopBarModules.byId(placement.descriptor.id);
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (showTitle) ...[
+          Text(
+            s.moduleSettingsTitle(s.moduleLabel(placement.descriptor.id)),
+            style: theme.text.systemBarCaption.copyWith(
+              fontSize: 12,
+              color: theme.colors.textSecondary,
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
+        if (module case final NeoModuleSettings configurable)
+          configurable.buildSettings(
+            context,
+            NeoModuleSettingsScope(
+              services: services,
+              monitorId: monitorId,
+              // Read from the placement, which already carries *this*
+              // instance's options: two copies of one module have their own,
+              // and reaching back into the config by module id would have
+              // both cards editing the first copy. The write still needs the
+              // instance id, which is why it is spelled out here.
+              options: placement.options,
+              setOption: (key, value) =>
+                  state.setOption(placement.id, key, value),
+            ),
+          )
+        else
+          Text(
+            s.moduleHasNoSettings,
+            style: theme.text.systemBarCaption.copyWith(
+              color: theme.colors.textTertiary,
+            ),
+          ),
+      ],
+    );
+    if (!inset) return content;
     return DecoratedBox(
       decoration: BoxDecoration(
         color: theme.colors.surfaceContainer.withValues(alpha: 0.45),
@@ -538,42 +591,7 @@ class _ExpandedSettings extends StatelessWidget {
       ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              s.moduleSettingsTitle(s.moduleLabel(placement.descriptor.id)),
-              style: theme.text.systemBarCaption.copyWith(
-                fontSize: 12,
-                color: theme.colors.textSecondary,
-              ),
-            ),
-            const SizedBox(height: 8),
-            if (module case final NeoModuleSettings configurable)
-              configurable.buildSettings(
-                context,
-                NeoModuleSettingsScope(
-                  services: services,
-                  monitorId: monitorId,
-                  // Read from the placement, which already carries *this*
-                  // instance's options: two copies of one module have their own,
-                  // and reaching back into the config by module id would have
-                  // both cards editing the first copy. The write still needs the
-                  // instance id, which is why it is spelled out here.
-                  options: placement.options,
-                  setOption: (key, value) =>
-                      state.setOption(placement.id, key, value),
-                ),
-              )
-            else
-              Text(
-                s.moduleHasNoSettings,
-                style: theme.text.systemBarCaption.copyWith(
-                  color: theme.colors.textTertiary,
-                ),
-              ),
-          ],
-        ),
+        child: content,
       ),
     );
   }

@@ -312,4 +312,118 @@ void main() {
       expect(placement.left, closeTo(1200 - 340 / 2, 0.001));
     });
   });
+
+  group('neoPointerPopupPlacement', () {
+    test('hangs off the pointer, to the right and below it', () {
+      final placement = neoPointerPopupPlacement(
+        scene: dp2,
+        output: dp2,
+        x: 1200,
+        y: 30,
+        width: 240,
+      )!;
+      expect(placement.left, 1204);
+      expect(placement.top, 34);
+      expect(placement.opensDownwards, isTrue);
+      expect(placement.bottom, isNull);
+      expect(placement.width, 240);
+    });
+
+    test('flips to the left of the pointer at the trailing edge', () {
+      final placement = neoPointerPopupPlacement(
+        scene: dp2,
+        output: dp2,
+        x: 2550,
+        y: 30,
+        width: 240,
+      )!;
+      // 2550 + 4 + 240 would leave the output, so the card goes to the left.
+      expect(placement.left, 2550 - 4 - 240);
+    });
+
+    test('opens upwards from a bar in the lower half', () {
+      final placement = neoPointerPopupPlacement(
+        scene: dp2,
+        output: dp2,
+        x: 1200,
+        y: 1410,
+        width: 240,
+      )!;
+      expect(placement.opensDownwards, isFalse);
+      expect(placement.top, isNull);
+      // The card's bottom edge sits just above the pointer.
+      expect(placement.bottom, dp2.bottom - (1410 - 4));
+    });
+
+    test('stays inside a narrow portrait output', () {
+      // eDP-1 rotated 90 degrees: 855 logical pixels wide.
+      const portrait = NeoSceneRect(left: 0, top: 0, width: 855, height: 1521);
+      final placement = neoPointerPopupPlacement(
+        scene: portrait,
+        output: portrait,
+        x: 850,
+        y: 400,
+        width: 240,
+      )!;
+      expect(placement.left, greaterThanOrEqualTo(8));
+      expect(placement.left + placement.width, lessThanOrEqualTo(847));
+    });
+
+    test('shrink-wraps a card wider than the output allows', () {
+      const narrow = NeoSceneRect(left: 0, top: 0, width: 200, height: 800);
+      final placement = neoPointerPopupPlacement(
+        scene: narrow,
+        output: narrow,
+        x: 40,
+        y: 100,
+        width: 400,
+      )!;
+      expect(placement.width, 200 - 16);
+    });
+
+    test('gives up instead of hanging a card with no room', () {
+      // Neither side of the pointer can hold a usable card.
+      const short = NeoSceneRect(left: 0, top: 0, width: 2560, height: 120);
+      expect(
+        neoPointerPopupPlacement(
+          scene: short,
+          output: short,
+          x: 1200,
+          y: 60,
+          width: 240,
+        ),
+        isNull,
+      );
+    });
+
+    test('rejects unusable inputs', () {
+      for (final bad in <NeoSceneRect>[
+        const NeoSceneRect(left: 0, top: 0, width: 0, height: 100),
+        const NeoSceneRect(left: 0, top: 0, width: 100, height: 0),
+        const NeoSceneRect(left: double.nan, top: 0, width: 100, height: 100),
+      ]) {
+        expect(
+          neoPointerPopupPlacement(
+            scene: bad,
+            output: bad,
+            x: 10,
+            y: 10,
+            width: 100,
+          ),
+          isNull,
+          reason: '$bad',
+        );
+      }
+      expect(
+        neoPointerPopupPlacement(
+          scene: dp2,
+          output: dp2,
+          x: double.infinity,
+          y: 10,
+          width: 100,
+        ),
+        isNull,
+      );
+    });
+  });
 }

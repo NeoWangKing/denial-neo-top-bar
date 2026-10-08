@@ -42,6 +42,8 @@ _samples = <String, ({String zh, String en})>{
     zh: zh.appearanceSettingsTitle,
     en: en.appearanceSettingsTitle,
   ),
+  'allModuleSettings': (zh: zh.allModuleSettings, en: en.allModuleSettings),
+  'pillGone': (zh: zh.pillGone, en: en.pillGone),
   'moduleSettingsTitle': (
     zh: zh.moduleSettingsTitle('X'),
     en: en.moduleSettingsTitle('X'),

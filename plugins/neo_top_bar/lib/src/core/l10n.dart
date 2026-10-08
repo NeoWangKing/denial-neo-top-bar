@@ -195,6 +195,13 @@ class NeoStrings {
   );
   String get appearanceSettingsTitle => _t('顶栏组件', 'Top bar components');
 
+  /// The way from one pill's own settings to the whole board.
+  String get allModuleSettings => _t('全部组件设置', 'All component settings');
+
+  /// Shown when a pill's settings card is open and that pill has left the bar.
+  String get pillGone =>
+      _t('这个组件已经不在栏上了', 'This component is no longer on the bar');
+
   /// Title of the expandable card for one module instance.
   String moduleSettingsTitle(String label) =>
       _t('「$label」设置', '$label settings');

@@ -35,6 +35,8 @@ class NeoPopupSurface extends ConsumerWidget {
     required this.services,
     required this.monitorId,
     this.anchor,
+    this.position,
+    this.padding,
     this.maxWidth = 420,
     this.maxHeight = 620,
     super.key,
@@ -51,6 +53,15 @@ class NeoPopupSurface extends ConsumerWidget {
   /// Scene-space rectangle of the control that opened the panel. When null the
   /// card falls back to centering inside the output.
   final Rect? anchor;
+
+  /// Scene-space point the card should appear beside, for popups that belong to
+  /// the pointer rather than to a control — the bar's own menu, and a pill's
+  /// settings card. Takes precedence over [anchor] when both are given.
+  final Offset? position;
+
+  /// Padding inside the card. The default suits a panel with a header and rows;
+  /// a menu wants much less, so its items reach the card's edges.
+  final EdgeInsetsGeometry? padding;
 
   /// Preferred card width, also used for exact horizontal clamping.
   final double maxWidth;
@@ -76,17 +87,27 @@ class NeoPopupSurface extends ConsumerWidget {
         );
         final monitor = _toSceneRect(monitorBounds);
         final output = monitor == null || monitor.isEmpty ? scene : monitor;
-        final anchorRect = _toSceneRect(anchor);
 
-        final placement = anchorRect == null
-            ? null
-            : neoAnchoredPopupPlacement(
-                scene: scene,
-                output: output,
-                anchor: anchorRect,
-                width: maxWidth,
-                maxHeight: maxHeight,
-              );
+        final placement = switch (position) {
+          final Offset point => neoPointerPopupPlacement(
+            scene: scene,
+            output: output,
+            x: point.dx,
+            y: point.dy,
+            width: maxWidth,
+            maxHeight: maxHeight,
+          ),
+          _ => switch (_toSceneRect(anchor)) {
+            final NeoSceneRect anchorRect => neoAnchoredPopupPlacement(
+              scene: scene,
+              output: output,
+              anchor: anchorRect,
+              width: maxWidth,
+              maxHeight: maxHeight,
+            ),
+            _ => null,
+          },
+        };
 
         if (placement == null) {
           // No usable anchor, or no room beside it: center inside the output.
@@ -119,6 +140,7 @@ class NeoPopupSurface extends ConsumerWidget {
                 // filling the strip below it.
                 maxWidth: placement.width,
                 maxHeight: placement.maxHeight,
+                padding: padding,
                 child: child,
               ),
             ),
@@ -158,11 +180,13 @@ class _NeoPopupCard extends StatelessWidget {
     required this.child,
     required this.maxWidth,
     required this.maxHeight,
+    this.padding,
   });
 
   final Widget child;
   final double maxWidth;
   final double maxHeight;
+  final EdgeInsetsGeometry? padding;
 
   @override
   Widget build(BuildContext context) {
@@ -185,7 +209,7 @@ class _NeoPopupCard extends StatelessWidget {
             border: Border.all(color: theme.colors.hairline),
           ),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+            padding: padding ?? const EdgeInsets.fromLTRB(16, 14, 16, 16),
             child: child,
           ),
         ),

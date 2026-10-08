@@ -159,6 +159,69 @@ class NeoPopupPlacement {
       'opensDownwards: $opensDownwards)';
 }
 
+/// Places a popup at the pointer, inside its output.
+///
+/// Different from [neoAnchoredPopupPlacement] on purpose: a menu or a
+/// per-control card that was asked for *at the cursor* belongs where the click
+/// happened, not centered under a widget. Its leading corner — with a small
+/// [gap] so the cursor does not sit on the card — is the pointer, and it only
+/// flips to the other side of the pointer when that would carry it past the
+/// output's edge. The flip is what keeps a menu on a bar at the bottom edge, or
+/// at the right edge, fully visible.
+///
+/// Returns null when the inputs are unusable or when neither side of the pointer
+/// has room for a usable card; callers then fall back to a centered card.
+NeoPopupPlacement? neoPointerPopupPlacement({
+  required NeoSceneRect scene,
+  required NeoSceneRect output,
+  required double x,
+  required double y,
+  required double width,
+  double maxHeight = 620,
+  double gap = 4,
+  double margin = 8,
+  double minimumHeight = 96,
+}) {
+  if (scene.isEmpty || output.isEmpty) return null;
+  if (!scene.isFinite || !output.isFinite) return null;
+  if (!x.isFinite || !y.isFinite) return null;
+
+  final usableWidth = output.width - margin * 2;
+  if (usableWidth <= 0) return null;
+  final cardWidth = width.clamp(0.0, usableWidth);
+
+  // Right of the pointer when it fits; otherwise left of it. Clamped either way,
+  // so a pointer near an edge still gets a card that is fully on screen.
+  final minLeft = output.left + margin;
+  final maxLeft = output.right - margin - cardWidth;
+  var left = x + gap;
+  if (left + cardWidth > output.right - margin) left = x - gap - cardWidth;
+  if (maxLeft < minLeft) {
+    left = minLeft;
+  } else {
+    left = left.clamp(minLeft, maxLeft);
+  }
+
+  // Open towards whichever side of the pointer has more room, so a right-click
+  // near the bottom of a bottom bar still opens a card that fits.
+  final below = (output.bottom - margin) - (y + gap);
+  final above = (y - gap) - (output.top + margin);
+  final opensDownwards = below >= above;
+  final available = opensDownwards ? below : above;
+  if (available < minimumHeight) return null;
+  final cardMaxHeight = available.clamp(0.0, maxHeight);
+  if (cardMaxHeight < minimumHeight) return null;
+
+  return NeoPopupPlacement(
+    left: left,
+    width: cardWidth,
+    top: opensDownwards ? y + gap : null,
+    bottom: opensDownwards ? null : scene.bottom - (y - gap),
+    maxHeight: cardMaxHeight,
+    opensDownwards: opensDownwards,
+  );
+}
+
 /// Attaches a panel to the control that opened it, inside its own output.
 ///
 /// The panel hangs directly below the control, horizontally centered on it, and
