@@ -498,6 +498,10 @@ class _LauncherSettingsState extends ConsumerState<_LauncherSettings> {
             ],
             if (options.fellBack)
               _SettingsNote(text: s.launcherFallbackActive, warning: true),
+            // Why the Denial chip is greyed out. It belongs to the icon group —
+            // it explains a choice in the row above — rather than to the end of
+            // the card, where it read as a remark about the window list.
+            _SettingsNote(text: s.launcherDenialUnavailable),
           ],
         ),
         const SizedBox(height: 14),
@@ -515,7 +519,6 @@ class _LauncherSettingsState extends ConsumerState<_LauncherSettings> {
             ),
           ],
         ),
-        _SettingsNote(text: s.launcherDenialUnavailable),
       ],
     );
   }

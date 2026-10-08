@@ -9,7 +9,20 @@ library;
 import 'package:denial_flutter_sdk/theme.dart';
 import 'package:flutter/material.dart';
 
+/// Below this width a row stops putting its control beside the text.
+///
+/// The board's card gives a row about 700px, where the two-column shape reads
+/// well; a pill's own settings card is one small popup, about 330px. In between
+/// the two, a chip row beside a label squeezes the label to one character per
+/// line — which is what the first version of the pointer card looked like.
+const double _inlineRowMinWidth = 460;
+
 /// Label and description on the left, a control on the right.
+///
+/// Switches are the exception to the narrow rule: a 44px switch always fits
+/// beside the text, and moving it below the text only makes the row taller. Every
+/// other control drops to its own line when the row is narrow, so it gets the
+/// full width to lay out in.
 class NeoSettingRow extends StatelessWidget {
   const NeoSettingRow({
     required this.label,
@@ -25,35 +38,48 @@ class NeoSettingRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShellTheme.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: theme.text.systemBarValue.copyWith(fontSize: 13),
-                ),
-                if (description.isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    description,
-                    style: theme.text.systemBarCaption.copyWith(
-                      fontSize: 11.5,
-                      color: theme.colors.textTertiary,
-                    ),
-                  ),
-                ],
-              ],
+    final text = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: theme.text.systemBarValue.copyWith(fontSize: 13)),
+        if (description.isNotEmpty) ...[
+          const SizedBox(height: 2),
+          Text(
+            description,
+            style: theme.text.systemBarCaption.copyWith(
+              fontSize: 11.5,
+              color: theme.colors.textTertiary,
             ),
           ),
-          const SizedBox(width: 12),
-          child,
         ],
+      ],
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < _inlineRowMinWidth &&
+              child is! NeoSettingToggle) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                text,
+                const SizedBox(height: 8),
+                // Left, not stretched: a chip row should read as the choices for
+                // the text above it rather than fill the card.
+                Align(alignment: Alignment.centerLeft, child: child),
+              ],
+            );
+          }
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(child: text),
+              const SizedBox(width: 12),
+              child,
+            ],
+          );
+        },
       ),
     );
   }
@@ -153,7 +179,10 @@ class NeoSettingChips<T> extends StatelessWidget {
     child: Wrap(
       spacing: 8,
       runSpacing: 8,
-      alignment: WrapAlignment.end,
+      // Leading, not trailing: on one line the row places this control itself, so
+      // the alignment only shows once the choices wrap onto a second line — and
+      // there they belong under the first one, not pushed to the far edge.
+      alignment: WrapAlignment.start,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         for (final entry in values.entries)

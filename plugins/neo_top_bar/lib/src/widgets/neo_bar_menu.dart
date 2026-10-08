@@ -279,7 +279,10 @@ class _NeoPillSettingsCard extends StatelessWidget {
           services: services,
           monitorId: monitorId,
           position: position,
-          maxWidth: 360,
+          // Wide enough for four chips to stay on one line and for a row's label
+          // to keep a real column, and no wider: this is a card beside the
+          // pointer, not a panel.
+          maxWidth: 420,
           maxHeight: 560,
           child: Column(
             mainAxisSize: MainAxisSize.min,
