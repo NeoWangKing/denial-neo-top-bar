@@ -902,6 +902,31 @@ Denial 的 `ShellFadeScale` 文档写得很明确：**内部会采样场景的�
   槽位尺寸不变（栏不会在指针下重排、落点计算稳定），但整个子树**不绘制**——
   `Opacity` 在 0 时不建图层、直接跳过绘制，所以也没有采样问题。
 
+### 弹出面板的出现动画：宿主的 `FadeTransition` 会把玻璃弄丢
+
+宿主的 `ShellPopupHost` 给**每个** popup 套一层
+`FadeTransition(opacity: 0→1) + ScaleTransition(0.96→1)`。而 `BackdropFilter`
+在 `Opacity` 图层**里面**时，采样到的是那个（还是空的）图层，不是它后面的场景。于是：
+
+| 时刻 | 现象 |
+|---|---|
+| 出现动画进行中（opacity < 1） | 没有磨砂，卡片只是一块半透明底色 |
+| 动画结束（opacity == 1） | `RenderAnimatedOpacity` 到 255 时**丢掉图层** → 磨砂"啪"地一下出现 |
+
+修法是**不要宿主那层动画**，自己做：
+
+- 六个 `show()` 全部传 `transitionDuration: neoPopupHostTransition`（= `Duration.zero`）。
+  宿主那条路径本来就被它自己的"减少动画"用过，零时长是它支持的。
+- `NeoPopupSurface` 自己放一个 `_NeoPopupAppearance`，**把动画拆成两半**：
+  - **缩放**放外层 `ScaleTransition`。变换对 `BackdropFilter` 无害——滤镜在变换后的
+    坐标系里采样，玻璃跟着卡片一起缩放。
+  - **淡入**通过 `_NeoPopupAppearanceScope` 传进卡片，只加在**盘面**上
+    （`ShellBackdropBlur(separateChild: true)` 里那个 `child`）。模糊是它的**兄弟**
+    （`Positioned.fill(backdrop)` 先画），所以模糊从不进 `Opacity` 图层，
+    **第一帧就是满强度**，盘面再淡进来。
+- 代价：**关闭是瞬时的**（宿主用的是同一个时长，没法只关掉"出现"那一半）。
+  如果之后想要淡出，得让宿主支持分别指定出现/关闭时长。
+
 ### 尊重"减少动画"
 
 `_press` / `_release` 会先查 `MediaQuery.disableAnimationsOf(context)`，

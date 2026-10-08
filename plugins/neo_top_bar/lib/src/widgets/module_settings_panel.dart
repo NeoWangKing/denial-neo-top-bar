@@ -56,6 +56,8 @@ void openModuleSettingsPanel({
         // No dimming scrim. Outside-tap and Escape still dismiss because the
         // barrier is transparent, not absent.
         barrierColor: Colors.transparent,
+        // The card animates itself; see `neoPopupHostTransition`.
+        transitionDuration: neoPopupHostTransition,
         builder: (context, handle) => NeoModuleSettingsPanel(
           state: state,
           services: services,

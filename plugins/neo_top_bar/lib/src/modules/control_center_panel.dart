@@ -59,6 +59,8 @@ void openControlCenterPanel({
         // icon is a context menu, and dimming the whole desktop for it is far
         // too heavy. Outside-tap and Escape still dismiss it.
         barrierColor: Colors.transparent,
+        // The card animates itself; see `neoPopupHostTransition`.
+        transitionDuration: neoPopupHostTransition,
         builder: (_, handle) => NeoControlCenterPanel(
           services: module.services,
           monitorId: module.monitorId,

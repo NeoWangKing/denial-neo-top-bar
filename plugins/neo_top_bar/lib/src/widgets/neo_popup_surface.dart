@@ -13,6 +13,24 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/popup_geometry.dart';
 
+/// The transition a bar popup asks the host for: none.
+///
+/// The host animates every popup by fading the whole surface, barrier included,
+/// with a `FadeTransition`. A `BackdropFilter` under an opacity layer samples
+/// *that layer* instead of the scene behind it, so during the fade the glass has
+/// nothing to blur — and the moment the fade reaches 1.0 the layer is dropped and
+/// the blur appears all at once. That is the "clear, then suddenly frosted" snap.
+///
+/// So the host's transition is switched off and [NeoPopupSurface] animates itself
+/// instead: it scales the card and fades only the *plate*, while the blurred
+/// backdrop stays a sibling of the fading part (`ShellBackdropBlur.separateChild`)
+/// and is therefore at full strength from the first frame. A transform is safe
+/// here; only opacity breaks the sampling.
+///
+/// The cost is that dismissing is immediate rather than faded: the host owns the
+/// close animation and it is the same duration as the open one.
+const Duration neoPopupHostTransition = Duration.zero;
+
 /// A panel card, attached to the control that opened it, inside its own output.
 ///
 /// Three separate requirements, each of which was its own bug:
@@ -134,14 +152,16 @@ class NeoPopupSurface extends ConsumerWidget {
               top: placement.top,
               bottom: placement.bottom,
               width: placement.width,
-              child: _NeoPopupCard(
-                // The Positioned supplies a tight width and the card hugs its
-                // content, so it hangs right under the control instead of
-                // filling the strip below it.
-                maxWidth: placement.width,
-                maxHeight: placement.maxHeight,
-                padding: padding,
-                child: child,
+              child: _NeoPopupAppearance(
+                child: _NeoPopupCard(
+                  // The Positioned supplies a tight width and the card hugs its
+                  // content, so it hangs right under the control instead of
+                  // filling the strip below it.
+                  maxWidth: placement.width,
+                  maxHeight: placement.maxHeight,
+                  padding: padding,
+                  child: child,
+                ),
               ),
             ),
           ],
@@ -156,10 +176,12 @@ class NeoPopupSurface extends ConsumerWidget {
         // consistent with the rest of the shell.
         minimum: const EdgeInsets.all(16),
         child: Center(
-          child: _NeoPopupCard(
-            maxWidth: maxWidth,
-            maxHeight: maxHeight,
-            child: child,
+          child: _NeoPopupAppearance(
+            child: _NeoPopupCard(
+              maxWidth: maxWidth,
+              maxHeight: maxHeight,
+              child: child,
+            ),
           ),
         ),
       );
@@ -173,6 +195,84 @@ class NeoPopupSurface extends ConsumerWidget {
           width: rect.width,
           height: rect.height,
         );
+}
+
+/// Runs a bar popup's own appearance animation.
+///
+/// The host's fade is switched off (see [neoPopupHostTransition]) and this takes
+/// its place. It is deliberately split in two:
+///
+/// - the **scale** is an outer [ScaleTransition]. A transform is harmless to a
+///   `BackdropFilter`: the filter is sampled in the transformed space, so the
+///   glass scales with the card;
+/// - the **fade** is handed down to the card through [_NeoPopupAppearanceScope],
+///   which applies it to the plate and the content *inside* the blur's child
+///   slot. The blurred backdrop is a sibling of that child
+///   (`ShellBackdropBlur.separateChild`), so it is never inside an opacity layer
+///   and is therefore at full strength from the first frame.
+class _NeoPopupAppearance extends StatefulWidget {
+  const _NeoPopupAppearance({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_NeoPopupAppearance> createState() => _NeoPopupAppearanceState();
+}
+
+class _NeoPopupAppearanceState extends State<_NeoPopupAppearance>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: Motion.cardSettle,
+  );
+  late final Animation<double> _fade = CurvedAnimation(
+    parent: _controller,
+    // The host's own curve, so a popup still arrives the way Denial's do.
+    curve: Motion.md3EmphasizedDecelerate,
+  );
+  late final Animation<double> _scale = Tween<double>(
+    begin: 0.96,
+    end: 1,
+  ).animate(_fade);
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Same rule the shell uses: with animations disabled the card is simply
+    // there, with no arrival at all.
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _controller.value = 1;
+    } else if (_controller.status == AnimationStatus.dismissed) {
+      _controller.forward();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => ScaleTransition(
+    scale: _scale,
+    child: _NeoPopupAppearanceScope(fade: _fade, child: widget.child),
+  );
+}
+
+/// Carries the appearance fade down to the card's plate.
+class _NeoPopupAppearanceScope extends InheritedWidget {
+  const _NeoPopupAppearanceScope({required this.fade, required super.child});
+
+  final Animation<double> fade;
+
+  static Animation<double>? maybeFadeOf(BuildContext context) => context
+      .dependOnInheritedWidgetOfExactType<_NeoPopupAppearanceScope>()
+      ?.fade;
+
+  @override
+  bool updateShouldNotify(_NeoPopupAppearanceScope oldWidget) =>
+      oldWidget.fade != fade;
 }
 
 class _NeoPopupCard extends StatelessWidget {
@@ -192,6 +292,18 @@ class _NeoPopupCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = ShellTheme.of(context);
     final radius = theme.panelRadius;
+    final plate = DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.panelColor(theme.colors.panelBackground),
+        borderRadius: BorderRadius.circular(radius),
+        border: Border.all(color: theme.colors.hairline),
+      ),
+      child: Padding(
+        padding: padding ?? const EdgeInsets.fromLTRB(16, 14, 16, 16),
+        child: child,
+      ),
+    );
+    final fade = _NeoPopupAppearanceScope.maybeFadeOf(context);
     return ConstrainedBox(
       constraints: BoxConstraints(maxWidth: maxWidth, maxHeight: maxHeight),
       child: ShellBackdropBlur(
@@ -202,17 +314,9 @@ class _NeoPopupCard extends StatelessWidget {
         separateChild: true,
         blur: theme.effectivePanelOpacity < 1.0,
         borderRadius: BorderRadius.circular(radius),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: theme.panelColor(theme.colors.panelBackground),
-            borderRadius: BorderRadius.circular(radius),
-            border: Border.all(color: theme.colors.hairline),
-          ),
-          child: Padding(
-            padding: padding ?? const EdgeInsets.fromLTRB(16, 14, 16, 16),
-            child: child,
-          ),
-        ),
+        child: fade == null
+            ? plate
+            : FadeTransition(opacity: fade, child: plate),
       ),
     );
   }

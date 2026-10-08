@@ -34,6 +34,8 @@ void openNeoCalendarPanel(
         // whole desktop for it is far too heavy. Outside-tap and Escape still
         // dismiss because the barrier is transparent, not absent.
         barrierColor: Colors.transparent,
+        // The card animates itself; see `neoPopupHostTransition`.
+        transitionDuration: neoPopupHostTransition,
         builder: (_, handle) => NeoCalendarPanel(
           services: module.services,
           monitorId: module.monitorId,

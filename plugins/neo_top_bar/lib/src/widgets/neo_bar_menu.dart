@@ -64,6 +64,8 @@ void openNeoBarMenu({
         // readable while the menu is open, and outside-tap still dismisses it
         // through the transparent barrier.
         barrierColor: Colors.transparent,
+        // The card animates itself; see `neoPopupHostTransition`.
+        transitionDuration: neoPopupHostTransition,
         builder: (context, handle) {
           final s = context.neoStrings;
           return _NeoPointerMenu(
@@ -104,6 +106,8 @@ void openNeoPillSettings({
         debugLabel: 'NeoTopBar pill settings',
         dismissPolicy: ShellDismissPolicy.outsideTapAndEscape,
         barrierColor: Colors.transparent,
+        // The card animates itself; see `neoPopupHostTransition`.
+        transitionDuration: neoPopupHostTransition,
         builder: (context, handle) => _NeoPillSettingsCard(
           state: state,
           services: services,
