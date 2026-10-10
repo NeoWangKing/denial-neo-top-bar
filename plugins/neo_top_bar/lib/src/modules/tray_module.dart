@@ -53,7 +53,11 @@ class _TrayContent extends ConsumerWidget {
         module.concession >= NeoConcession.tray &&
         ids.length > neoTrayCompactLimit;
     final shown = collapse ? ids.take(neoTrayCompactLimit).toList() : ids;
-    final hidden = ids.length - shown.length;
+    // What the chevron opens: the icons the bar is *not* showing, in the order
+    // the host listed them. Repeating the visible ones would make the flyout a
+    // second copy of the pill instead of the answer to "where did the rest go",
+    // and the user would have to work out which of them are the new ones.
+    final collapsed = collapse ? ids.sublist(shown.length) : const <String>[];
 
     return NeoCard(
       accent: module.accent,
@@ -72,11 +76,11 @@ class _TrayContent extends ConsumerWidget {
             horizontal: module.horizontal,
             itemIds: shown,
           ),
-          if (hidden > 0) ...[
+          if (collapsed.isNotEmpty) ...[
             SizedBox(width: 6 * module.density),
             _TrayOverflow(
-              label: s.trayMoreIcons(hidden),
-              onPressed: () => _openTrayPanel(context, ids),
+              label: s.trayMoreIcons(collapsed.length),
+              onPressed: () => _openTrayPanel(context, collapsed),
             ),
           ],
         ],
@@ -84,17 +88,22 @@ class _TrayContent extends ConsumerWidget {
     );
   }
 
-  /// The collapsed icons, in a flyout the host renders.
+  /// The icons the bar had to collapse, in a flyout the host renders.
   ///
   /// Not a second tray implementation: the same `buildSystemTray` draws them, so
   /// activation, context menus and submenus behave exactly as they do on the bar.
   ///
-  /// Nothing else goes in this card — no title, no close button. It is a tray
-  /// overflow, not a panel: Windows' flyout is the same thing, a small grid of
-  /// icons whose dismissal is the click outside (or Escape) that the shell's
-  /// dismiss policy already gives it, and a header only made a mostly empty card
-  /// out of four icons. The width hugs the grid for the same reason.
-  void _openTrayPanel(BuildContext context, List<String> ids) {
+  /// Only [collapsedIds] — the icons the bar is *not* showing. Windows' overflow
+  /// flyout holds exactly the icons that did not fit for the same reason: the
+  /// visible ones are already on the bar, and a flyout that repeated them would
+  /// bury the two the user came looking for.
+  ///
+  /// Nothing else goes in this card either — no title, no close button. It is a
+  /// tray overflow, not a panel: dismissal is the click outside (or Escape) the
+  /// shell's dismiss policy already gives it, and a header only made a mostly
+  /// empty card out of a couple of icons. The width hugs the grid for the same
+  /// reason.
+  void _openTrayPanel(BuildContext context, List<String> collapsedIds) {
     final services = module.services;
     final ref = ProviderScope.containerOf(context, listen: false);
     // The pill's rectangle has to be read *here*, on the bar's own context.
@@ -123,12 +132,12 @@ class _TrayContent extends ConsumerWidget {
             monitorId: module.monitorId,
             anchor: anchor,
             padding: const EdgeInsets.all(_trayFlyoutPadding),
-            maxWidth: _trayFlyoutWidth(ids.length),
+            maxWidth: _trayFlyoutWidth(collapsedIds.length),
             child: services.buildSystemTray(
               context,
               horizontal: true,
               wrap: true,
-              itemIds: ids,
+              itemIds: collapsedIds,
             ),
           ),
         );
