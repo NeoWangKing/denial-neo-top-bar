@@ -111,6 +111,13 @@ class _TrayContent extends ConsumerWidget {
           debugLabel: 'NeoTopBar tray overflow',
           dismissPolicy: ShellDismissPolicy.outsideTapAndEscape,
           barrierColor: Colors.transparent,
+          // The card animates itself: the host's fade would put the whole
+          // surface — the `BackdropFilter` included — under one opacity layer,
+          // and a backdrop filter under an opacity layer samples that layer
+          // instead of the scene. The glass then has nothing to blur until the
+          // fade reaches 1.0 and snaps in. This is the calendar's bug, and the
+          // tray was the one opener that did not opt out of it.
+          transitionDuration: neoPopupHostTransition,
           builder: (context, _) => NeoPopupSurface(
             services: services,
             monitorId: module.monitorId,

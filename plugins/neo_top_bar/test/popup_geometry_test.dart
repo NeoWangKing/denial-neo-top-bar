@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:neo_top_bar/neo_top_bar_logic.dart';
 import 'package:test/test.dart';
 
@@ -423,6 +425,44 @@ void main() {
           width: 100,
         ),
         isNull,
+      );
+    });
+  });
+  group('every bar popup', () {
+    test('opts out of the host fade that eats the glass', () {
+      // The host fades a whole popup surface — barrier included — with one
+      // `FadeTransition`. A `BackdropFilter` under an opacity layer samples that
+      // layer instead of the scene, so during the fade the glass has nothing to
+      // blur and it snaps in on the last frame: the "clear, then suddenly
+      // frosted" arrival. `NeoPopupSurface` animates itself instead, which only
+      // works if the caller asked the host for no transition at all.
+      //
+      // A source check rather than a widget test — the plugin has none (see the
+      // README) — and worth having because this bug has shipped twice: first the
+      // calendar, then the tray overflow, which opens its popup directly instead
+      // of going through one of the panel helpers.
+      final root = File.fromUri(Platform.script).parent.parent;
+      final lib = Directory('${root.path}/lib/src');
+      expect(lib.existsSync(), isTrue);
+      final openers = <String>[];
+      for (final entity in lib.listSync(recursive: true)) {
+        if (entity is! File || !entity.path.endsWith('.dart')) continue;
+        final text = entity.readAsStringSync();
+        if (!text.contains('shellPopupControllerProvider')) continue;
+        if (!text.contains('.show(')) continue;
+        openers.add(entity.uri.pathSegments.last);
+        expect(
+          text.contains('transitionDuration: neoPopupHostTransition'),
+          isTrue,
+          reason:
+              '${entity.path} shows a popup without opting out of the '
+              'host fade, so its glass will snap in instead of fading with it',
+        );
+      }
+      expect(
+        openers,
+        isNotEmpty,
+        reason: 'the scan has to find the files that open popups',
       );
     });
   });

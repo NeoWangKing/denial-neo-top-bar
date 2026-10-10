@@ -1062,8 +1062,12 @@ Denial 的 `ShellFadeScale` 文档写得很明确：**内部会采样场景的�
 
 修法是**不要宿主那层动画**，自己做：
 
-- 六个 `show()` 全部传 `transitionDuration: neoPopupHostTransition`（= `Duration.zero`）。
+- **每个** `show()` 都要传 `transitionDuration: neoPopupHostTransition`（= `Duration.zero`）。
   宿主那条路径本来就被它自己的"减少动画"用过，零时长是它支持的。
+  这条不写就会漏：日历先中过一次，托盘展开面板是第二例（它是直接 `show` 的，没走
+  `*_panel.dart` helper）。所以现在有一条**源码级单测**（`test/popup_geometry_test.dart`）
+  扫 `lib/src` 里所有同时出现 `shellPopupControllerProvider` 和 `.show(` 的文件，
+  要求它同时出现 `transitionDuration: neoPopupHostTransition`——忘了就红。
 - `NeoPopupSurface` 自己放一个 `_NeoPopupAppearance`，**把动画拆成两半**：
   - **缩放**放外层 `ScaleTransition`。变换对 `BackdropFilter` 无害——滤镜在变换后的
     坐标系里采样，玻璃跟着卡片一起缩放。
