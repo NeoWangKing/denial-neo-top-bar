@@ -21,18 +21,22 @@ library;
 import 'dart:io';
 
 import 'package:denial_flutter_sdk/services.dart';
+import 'package:denial_flutter_sdk/state.dart';
 import 'package:denial_flutter_sdk/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 import '../core/bar_budget.dart';
+import '../core/launcher_menu.dart';
 import '../core/launcher_options.dart';
 import '../core/l10n_context.dart';
 import '../core/module.dart';
 import '../core/module_defaults.dart';
 import '../core/module_descriptor.dart';
+import '../core/settings_requests.dart';
 import '../core/window_order.dart';
+import '../widgets/neo_bar_menu.dart';
 import '../widgets/neo_card.dart';
 import '../widgets/neo_file_browser.dart';
 import '../widgets/neo_setting_controls.dart';
@@ -158,8 +162,7 @@ class _LauncherContentState extends ConsumerState<_LauncherContent> {
     // Over budget the strip is what goes: the mark alone still opens the
     // launcher, and the window strip is the widest optional part of any pill.
     final listed =
-        options.showWindows &&
-            module.concession < NeoConcession.launcherStrip
+        options.showWindows && module.concession < NeoConcession.launcherStrip
         ? ordered
         : const <ApplicationWindow>[];
     // A vertical pill has room for a handful of stacked icons, not ten: the bar
@@ -212,14 +215,22 @@ class _LauncherContentState extends ConsumerState<_LauncherContent> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Center(
-                child: NeoLauncherMark(
-                  art: neoLauncherArt(
-                    options: options,
-                    systemLogoPath: logo.path,
-                    bundledAsset: kLauncherLogoAsset,
+                child: GestureDetector(
+                  // Right-clicking the mark is the launcher's own menu, the way
+                  // Windows answers a right-click on the Start button. A deeper
+                  // recogniser wins the arena, so the pill underneath still opens
+                  // *its* settings on a right-click that misses the mark.
+                  onSecondaryTapDown: (details) =>
+                      _openLauncherMenu(context, details.globalPosition),
+                  child: NeoLauncherMark(
+                    art: neoLauncherArt(
+                      options: options,
+                      systemLogoPath: logo.path,
+                      bundledAsset: kLauncherLogoAsset,
+                    ),
+                    size: logoSize,
+                    color: theme.colors.textPrimary,
                   ),
-                  size: logoSize,
-                  color: theme.colors.textPrimary,
                 ),
               ),
               if (shown.isNotEmpty) ...[
@@ -246,6 +257,8 @@ class _LauncherContentState extends ConsumerState<_LauncherContent> {
                     window: shown[index],
                     services: services,
                     size: windowSize,
+                    onMenu: (position) =>
+                        _openWindowMenu(context, shown[index], position),
                   ),
                 ],
                 if (hidden > 0) ...[
@@ -267,6 +280,124 @@ class _LauncherContentState extends ConsumerState<_LauncherContent> {
       ),
     );
   }
+
+  /// The launcher's own menu: what the host lets a plugin ask for, plus its
+  /// settings card.
+  ///
+  /// Windows puts the same kind of list on its Start button. What is *not* here
+  /// is as deliberate as what is: the host exposes no "pin to the bar" and no way
+  /// to open Denial's own settings to a surface plugin, and an entry that quietly
+  /// did nothing would be worse than its absence — see the README.
+  void _openLauncherMenu(BuildContext context, Offset position) {
+    final s = context.neoStrings;
+    final module = widget.module;
+    final services = module.services;
+    final terminal = neoTerminalAppId(_applications());
+    openNeoMenu(
+      context: context,
+      services: services,
+      monitorId: module.monitorId,
+      position: position,
+      title: s.moduleLabel(NeoModuleIds.launcher),
+      keyName: 'neo_top_bar.launcher_menu',
+      debugLabel: 'NeoTopBar launcher menu',
+      actions: <NeoBarMenuAction>[
+        NeoBarMenuAction(
+          label: s.launcherMenuOpenLauncher,
+          icon: Icons.apps,
+          onSelected: services.toggleLauncher,
+        ),
+        if (terminal != null)
+          NeoBarMenuAction(
+            label: s.launcherMenuOpenTerminal,
+            icon: Icons.terminal,
+            onSelected: () => services.launchApplication(
+              terminal,
+              monitorId: module.monitorId,
+            ),
+          ),
+      ],
+      trailing: NeoBarMenuAction(
+        label: s.settingsTitle,
+        icon: Icons.tune,
+        onSelected: NeoSettingsRequests.instance.request,
+      ),
+    );
+  }
+
+  /// One window's menu, with the window's own title as its caption.
+  ///
+  /// "New window" is only offered when the host's catalog can answer for this
+  /// app, and it follows the window's app id rather than its title, so a renamed
+  /// window still opens the right application.
+  void _openWindowMenu(
+    BuildContext context,
+    ApplicationWindow window,
+    Offset position,
+  ) {
+    final s = context.neoStrings;
+    final module = widget.module;
+    final services = module.services;
+    final newWindow = neoNewWindowAppId(
+      applications: _applications(),
+      appId: window.appId,
+    );
+    openNeoMenu(
+      context: context,
+      services: services,
+      monitorId: module.monitorId,
+      position: position,
+      title: window.title,
+      maxWidth: 260,
+      keyName: 'neo_top_bar.window_menu.${window.id}',
+      debugLabel: 'NeoTopBar window menu',
+      actions: <NeoBarMenuAction>[
+        if (newWindow != null)
+          NeoBarMenuAction(
+            label: s.launcherMenuNewWindow,
+            icon: Icons.add,
+            onSelected: () => services.launchApplication(
+              newWindow,
+              monitorId: module.monitorId,
+            ),
+          ),
+        NeoBarMenuAction(
+          label: s.launcherMenuCloseWindow,
+          icon: Icons.close,
+          onSelected: () => _closeWindow(window.id),
+        ),
+      ],
+    );
+  }
+
+  /// Asks the shell to close the window a launcher icon stands for.
+  ///
+  /// `ApplicationWindow.id` is the host's *object* id, while the controller wants
+  /// the window record, so the two are matched on `objectId`. A window that
+  /// closed between the click and the menu is not there any more, and this does
+  /// nothing rather than guessing.
+  void _closeWindow(int objectId) {
+    final shell = ref.read(shellControllerProvider);
+    for (final window in shell.openAppWindows) {
+      if (window.objectId != objectId) continue;
+      ref.read(shellControllerProvider.notifier).closeWindow(window);
+      return;
+    }
+  }
+
+  /// The host's catalog, in the shape the menu logic wants.
+  ///
+  /// Read once when a menu opens rather than watched: the menu is a snapshot of
+  /// what was true when the user asked for it.
+  List<NeoLaunchableApp> _applications() => <NeoLaunchableApp>[
+    for (final application in ref.read(widget.module.services.applications))
+      (
+        id: application.id,
+        appId: application.appId,
+        name: application.name,
+        windowAppIds: application.windowAppIds,
+      ),
+  ];
 }
 
 /// The launcher's mark, drawn from whichever source the settings chose.
@@ -369,11 +500,16 @@ class _WindowIcon extends StatelessWidget {
     required this.window,
     required this.services,
     required this.size,
+    required this.onMenu,
   });
 
   final ApplicationWindow window;
   final ShellServices services;
   final double size;
+
+  /// Opens this window's menu, at the pointer. Called on the secondary button,
+  /// which the pill below would otherwise take for its own settings card.
+  final ValueChanged<Offset> onMenu;
 
   @override
   Widget build(BuildContext context) {
@@ -391,6 +527,7 @@ class _WindowIcon extends StatelessWidget {
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: activate,
+              onSecondaryTapDown: (details) => onMenu(details.globalPosition),
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   // The focused window gets an accent plate; a minimized one is

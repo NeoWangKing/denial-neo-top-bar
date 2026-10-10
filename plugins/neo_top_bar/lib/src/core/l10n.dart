@@ -342,6 +342,13 @@ class NeoStrings {
       ? 'Open the app launcher · 1 window on this workspace'
       : 'Open the app launcher · $count windows on this workspace';
   String launcherUsingPath(String path) => _t('用的是 $path', 'Using $path');
+  // The launcher pill's right-click menu. "Close window" is the shell's close
+  // *request* — the application still gets to ask about unsaved work, exactly
+  // like Windows' own taskbar entry — so it is not called a force-quit.
+  String get launcherMenuOpenLauncher => _t('打开应用启动器', 'Open the app launcher');
+  String get launcherMenuOpenTerminal => _t('打开终端', 'Open a terminal');
+  String get launcherMenuNewWindow => _t('新窗口', 'New window');
+  String get launcherMenuCloseWindow => _t('关闭窗口', 'Close window');
   String get launcherDenialUnavailable => _t(
     'Denial 官方图标还没有发布，所以这一项暂时不能选。',
     'Denial has not published its own mark yet, so this cannot be picked.',

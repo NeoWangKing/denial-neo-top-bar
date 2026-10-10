@@ -53,12 +53,59 @@ void openNeoBarMenu({
   required Offset position,
   List<NeoBarMenuAction> actions = const <NeoBarMenuAction>[],
 }) {
+  final s = context.neoStrings;
+  openNeoMenu(
+    context: context,
+    services: services,
+    monitorId: monitorId,
+    position: position,
+    title: s.appearanceSettingsTitle,
+    keyName: 'neo_top_bar.menu',
+    debugLabel: 'NeoTopBar menu',
+    actions: actions,
+    // The settings card is a popup of its own, and the bar owns it: this menu
+    // closes and *asks* for it, the same way the control centre's pencil does.
+    // Opening it from here would race the popup host.
+    trailing: NeoBarMenuAction(
+      label: s.settingsTitle,
+      icon: Icons.tune,
+      // The menu closes itself before running a row (see [openNeoMenu]), so this
+      // only has to ask. Opening the card from here while the menu is still up
+      // would race the popup host.
+      onSelected: NeoSettingsRequests.instance.request,
+    ),
+  );
+}
+
+/// Opens a pointer-owned menu at [position].
+///
+/// One implementation for every menu the bar shows — its own, a window's, the
+/// launcher's — because they differ only in their rows: the chrome (no scrim, no
+/// transition of the host's, a card that hangs at the pointer and dismisses on an
+/// outside tap) is decided once, here.
+///
+/// [title] is the caption above the rows and [trailing] an optional last row
+/// behind a divider, which is where a settings entry is looked for.
+/// [onSelected] runs after the menu has been asked to close, so a row can open
+/// something else without racing the popup host.
+void openNeoMenu({
+  required BuildContext context,
+  required ShellServices services,
+  required int monitorId,
+  required Offset position,
+  required String title,
+  required List<NeoBarMenuAction> actions,
+  required String keyName,
+  required String debugLabel,
+  NeoBarMenuAction? trailing,
+  double maxWidth = 240,
+}) {
   final ref = ProviderScope.containerOf(context, listen: false);
   ref
       .read(shellPopupControllerProvider.notifier)
       .show(
-        keyName: 'neo_top_bar.menu',
-        debugLabel: 'NeoTopBar menu',
+        keyName: keyName,
+        debugLabel: debugLabel,
         dismissPolicy: ShellDismissPolicy.outsideTapAndEscape,
         // No dimming scrim, exactly like the settings card: the bar stays
         // readable while the menu is open, and outside-tap still dismisses it
@@ -66,28 +113,35 @@ void openNeoBarMenu({
         barrierColor: Colors.transparent,
         // The card animates itself; see `neoPopupHostTransition`.
         transitionDuration: neoPopupHostTransition,
-        builder: (context, handle) {
-          final s = context.neoStrings;
-          return _NeoPointerMenu(
-            services: services,
-            monitorId: monitorId,
-            position: position,
-            actions: actions,
-            settings: NeoBarMenuAction(
-              label: s.settingsTitle,
-              icon: Icons.tune,
-              // The card is a popup of its own, and the bar owns it: this menu
-              // closes and *asks* for it, the same way the control centre's
-              // pencil does. Opening it from here would race the popup host.
-              onSelected: () {
-                handle.close();
-                NeoSettingsRequests.instance.request();
-              },
-            ),
-          );
-        },
+        builder: (context, handle) => _NeoPointerMenu(
+          services: services,
+          monitorId: monitorId,
+          position: position,
+          title: title,
+          maxWidth: maxWidth,
+          actions: <NeoBarMenuAction>[
+            for (final action in actions) _closeThen(action, handle),
+          ],
+          trailing: trailing == null ? null : _closeThen(trailing, handle),
+        ),
       );
 }
+
+/// Wraps [action] so it runs *after* the menu has been asked to close.
+///
+/// Every row goes through this, because a menu that stayed open behind whatever
+/// the row opened is the kind of thing each caller would otherwise have to
+/// remember — and one of them (the settings card, a popup of its own) cannot be
+/// opened while this one is still up at all.
+NeoBarMenuAction _closeThen(NeoBarMenuAction action, ShellPopupHandle handle) =>
+    NeoBarMenuAction(
+      label: action.label,
+      icon: action.icon,
+      onSelected: () {
+        handle.close();
+        action.onSelected();
+      },
+    );
 
 /// Opens the settings card for one pill instance at [position].
 void openNeoPillSettings({
@@ -125,25 +179,29 @@ class _NeoPointerMenu extends StatelessWidget {
     required this.services,
     required this.monitorId,
     required this.position,
+    required this.title,
+    required this.maxWidth,
     required this.actions,
-    required this.settings,
+    required this.trailing,
   });
 
   final ShellServices services;
   final int monitorId;
   final Offset position;
+  final String title;
+  final double maxWidth;
   final List<NeoBarMenuAction> actions;
-  final NeoBarMenuAction settings;
+  final NeoBarMenuAction? trailing;
 
   @override
   Widget build(BuildContext context) {
     final theme = ShellTheme.of(context);
-    final s = context.neoStrings;
+    final trailing = this.trailing;
     return NeoPopupSurface(
       services: services,
       monitorId: monitorId,
       position: position,
-      maxWidth: 240,
+      maxWidth: maxWidth,
       maxHeight: 420,
       // A menu wants its rows to reach the card's edges; the panel padding would
       // put a gutter around every hover highlight.
@@ -155,15 +213,19 @@ class _NeoPointerMenu extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(10, 5, 10, 7),
             child: Text(
-              s.appearanceSettingsTitle,
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: theme.text.systemBarCaption.copyWith(
                 color: theme.colors.textTertiary,
               ),
             ),
           ),
           for (final action in actions) _NeoMenuRow(action: action),
-          if (actions.isNotEmpty) const _NeoMenuDivider(),
-          _NeoMenuRow(action: settings),
+          if (trailing != null) ...[
+            if (actions.isNotEmpty) const _NeoMenuDivider(),
+            _NeoMenuRow(action: trailing),
+          ],
         ],
       ),
     );

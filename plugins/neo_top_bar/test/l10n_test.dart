@@ -170,6 +170,22 @@ _samples = <String, ({String zh, String en})>{
   'batteryGlyphIcon': (zh: zh.batteryGlyphIcon, en: en.batteryGlyphIcon),
   'clockCompactNote': (zh: zh.clockCompactNote, en: en.clockCompactNote),
   'trayMoreIcons': (zh: zh.trayMoreIcons(2), en: en.trayMoreIcons(2)),
+  'launcherMenuOpenLauncher': (
+    zh: zh.launcherMenuOpenLauncher,
+    en: en.launcherMenuOpenLauncher,
+  ),
+  'launcherMenuOpenTerminal': (
+    zh: zh.launcherMenuOpenTerminal,
+    en: en.launcherMenuOpenTerminal,
+  ),
+  'launcherMenuNewWindow': (
+    zh: zh.launcherMenuNewWindow,
+    en: en.launcherMenuNewWindow,
+  ),
+  'launcherMenuCloseWindow': (
+    zh: zh.launcherMenuCloseWindow,
+    en: en.launcherMenuCloseWindow,
+  ),
   'workspaceShowWindows': (
     zh: zh.workspaceShowWindows,
     en: en.workspaceShowWindows,

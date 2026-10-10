@@ -16,7 +16,7 @@
 | 模块 | id | 区 | 默认 | 说明 |
 |---|---|---|---|---|
 | 工作区胶囊 | `workspaces` | 左 | 开 | 每个工作区一个圆点，当前工作区高亮，占用状态变实心；点击切换；**可选**（默认关）在每个工作区里显示它自己的窗口图标，最多 3 个 + `+N` |
-| 应用启动器 | `launcher` | 中 | 开 | Arch Linux 图标 + **当前工作区每个窗口的图标**，点击图标聚焦该窗口、点击其余部分调 `services.toggleLauncher()`；胶囊宽度随窗口数动态伸缩，超过 10 个折叠成 `+N`；图标顺序按窗口**首次出现**固定，点谁都不会重排 |
+| 应用启动器 | `launcher` | 中 | 开 | Arch Linux 图标 + **当前工作区每个窗口的图标**，点击图标聚焦该窗口、点击其余部分调 `services.toggleLauncher()`；**右键图标出窗口菜单（新窗口 / 关闭窗口），右键 Arch 图标出启动器菜单（打开启动器 / 打开终端 / 设置）**；胶囊宽度随窗口数动态伸缩，超过 10 个折叠成 `+N`；图标顺序按窗口**首次出现**固定，点谁都不会重排 |
 | 系统托盘 | `tray` | 右 | 开 | StatusNotifier 图标；托盘隐藏或为空时整块自动消失（**不会留下空位**）；空间不够时只留前 3 个，其余收进一个向下箭头（**裸字形、没有底色**，因为宿主把托盘图标画成裸的 22px 方块；点它展开，锚在胶囊正下方，弹出的是**被折叠的那几个图标**（栏上已经有的不再重复一遍——那只会让人找不到自己要找的那个）：宽高都贴着 4 列网格算，没有标题也没有关闭按钮，点外面 / Esc 关） |
 | 通知 | `notifications` | 右 | 开 | 未读徽章 + 历史面板（逐条忽略 / 全部清除 / 免打扰） |
 | 媒体播放 | `media` | 右 | **关** | 曲目 + 上一首 / 播放暂停 / 下一首；无播放时自动消失（不留空位、不留间隙） |
@@ -181,6 +181,7 @@ DENIAL_PLUGIN_DART="$(command -v dart)"
 ```sh
 "$DENIAL_PLUGIN_DART" --packages=.dart_tool/package_config.json test/config_test.dart
 "$DENIAL_PLUGIN_DART" --packages=.dart_tool/package_config.json test/bar_budget_test.dart
+"$DENIAL_PLUGIN_DART" --packages=.dart_tool/package_config.json test/launcher_menu_test.dart
 "$DENIAL_PLUGIN_DART" --packages=.dart_tool/package_config.json test/popup_geometry_test.dart
 "$DENIAL_PLUGIN_DART" --packages=.dart_tool/package_config.json test/preferences_test.dart
 "$DENIAL_PLUGIN_DART" --packages=.dart_tool/package_config.json test/window_order_test.dart
@@ -236,6 +237,7 @@ lib/
     bar_budget.dart         空间预算：什么时候让步、记忆怎么防抖（不引 dart:ui，可单测）
     popup_geometry.dart     面板锚定几何（不引 dart:ui，可单测）
     window_order.dart       启动器窗口图标的稳定顺序（不引 dart:ui，可单测）
+    launcher_menu.dart      启动器右键菜单能点什么：窗口对应哪个目录项、哪个是终端（纯逻辑，可单测）
     control_center_model.dart 控制中心的纯逻辑（列表排序、主题切换、有线判定、确认规则、选项解析）
     calendar_data.dart      日历的纯日期逻辑
   src/modules/              每个模块一个文件
@@ -749,6 +751,35 @@ center 拿剩下的并在不够时滚动，start 最多占一半（免得一堆�
 - **没开这项时外观和以前完全一致**（纯圆点、没有填充）。
 - **只在开关打开时才订阅窗口快照**：`shellControllerProvider` 每次窗口事件都会重建，纯圆点的
   胶囊没必要付这个代价。
+
+### 启动器胶囊的右键菜单：窗口菜单 + 启动器菜单
+
+按 Windows 任务栏的习惯做的，但**只做宿主真的允许做的事**——菜单项静默失灵比没有这一项更糟：
+
+| 右键位置 | 菜单 | 动作 |
+|---|---|---|
+| 某个窗口图标 | 标题 = 那个窗口的标题 | 新窗口（目录里找得到这个 app 才有）· 关闭窗口 |
+| Arch 图标 | 标题 = 「应用启动器」 | 打开应用启动器 · 打开终端（目录里找得到终端才有）· 设置（分隔线之后，和栏菜单同一个位置惯例） |
+
+- **手势竞技场决定谁接右键**：窗口图标 / Arch 图标是更深的手势识别器，所以点中它们时菜单归它们；
+  点在胶囊的空白处仍然是「这个胶囊的设置」——和其它胶囊一致（见上文「右键为什么只在空白处生效」）。
+- **「关闭窗口」是宿主的关闭*请求***（`shellControllerProvider.notifier.closeWindow`），
+  和 Windows 任务栏那一条一样，应用仍然可以弹「要不要保存」。**不是**杀进程——宿主没有给插件
+  这个能力，所以文案也不写成「强制关闭」。
+- **「新窗口」按 appId 找目录项**（`LaunchableApplication.windowAppIds` 优先，其次 appId 相同），
+  找不到就**不显示**这一项：宁可少一项，也不要一个点了没反应的入口。
+- **「打开终端」靠一份词表猜**（`neoTerminalWords`，如 `kitty`/`foot`/`ghostty`/`wezterm`/`org.gnome.Terminal`）：
+  宿主的应用目录里**没有**「这是终端」这个字段，只有 appId 和显示名，所以按 appId 末段或名字匹配，
+  词表短且明确，末尾才放通用的 `terminal`。目录里一个都匹配不上就**不显示**这一项。
+- **没有做、也做不了的**（宿主对 surface 插件没有这些 API，不是偷懒）：
+  - *固定到栏*：Denial 的 pinned 窗口是「所有工作区可见」，没有任何请求能设置它；launcher 的收藏
+    也在 launcher 插件自己的状态里，surface 插件拿不到；
+  - *最小化*：wire 协议有 `WindowActionKind.Minimize`，但那是宿主→外壳的事件，没有反向请求；
+  - *强制结束（杀进程）*：协议里只有 close 请求，没有 PID，也没有 kill；
+  - *打开 Denial 自己的设置*：`ShortcutActionKind.OpenSettings` 是宿主内部的动作，插件没有通道，
+    所以菜单里的「设置」是**这个栏**的设置卡。
+  这四样要做得先扩宿主：wire 加请求类型 + 原生实现 + `ShellWindowServices` 加方法，属于 Denial 本体
+  的改动，不是这个插件能单独完成的。
 
 ### 启动器的设置：图标来源与窗口列表
 
