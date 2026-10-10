@@ -186,6 +186,36 @@ DENIAL_PLUGIN_DART="$(command -v dart)"
 "$DENIAL_PLUGIN_DART" --packages=.dart_tool/package_config.json test/control_center_model_test.dart
 ```
 
+### Denial 是源码构建的时候，apply 要用哪一份工具
+
+这台机器上现在同时存在两套 Denial：系统包 `denial 0.5.0-1`（`/usr/bin/deniald`，登录器里的
+`Denial`）和本地源码构建（`~/.cache/denial/pc-build/rust/release/deniald`，登录器里的
+`Denial (development)`）。**插件构建套件是按「已安装构建」的身份选的**，所以用错工具就会出现：
+
+```
+plugin bundle source does not match installed Denial; prepare the matching build tools and rebuild
+```
+
+（bundle 构建成功、但 shell 拒绝启用，composition 停在旧候选上。更麻烦的是：系统那份
+manager 会把它认的 kit 写进共享状态，并**顺手删掉 dev 那份 kit**。）
+
+在 dev 会话里改插件时，用**本地构建自带的那份 manager**：
+
+```sh
+DENIAL_SRC="$HOME/Projects/Denial/denial"
+"$DENIAL_SRC/tools/denial-plugins" bootstrap          # 按运行中的构建重新准备 kit（自带正确身份）
+"$DENIAL_SRC/tools/denial-plugins" --brief status     # 确认 configuration.build-kit 变了
+PUB_HOSTED_URL=https://pub.flutter-io.cn "$DENIAL_SRC/tools/denial-plugins" submit apply
+```
+
+判断标准：`status` 里的 `configuration.build-kit` 指向的 kit，其 `kit.json` 的
+`identity.source_revision` 要等于**正在运行的那个 deniald** 的源码修订（dev 构建就是
+`~/Projects/Denial/denial` 的 `git rev-parse HEAD`）。kit 哈希是按输入算的，所以同一个构建
+每次算出来都一样（这台机器上 dev 构建 = `b48ea491…`，0.5.0 包 = `8b3b2d88…`）。
+
+顺带一个反直觉但正常的现象：**dev 会话和系统会话共用** `~/.local/state/denial/plugins`，
+所以两边切换登录时 shell 会各自重建一次插件候选（切换期间黑几秒），属预期行为。
+
 ## 代码结构
 
 ```
