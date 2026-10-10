@@ -82,16 +82,19 @@ class _WorkspaceContent extends ConsumerWidget {
 
     final horizontal = module.horizontal;
     final options = neoWorkspaceOptions(module.options);
+    // Over budget the cells fall back to plain dots: the icons are the widest
+    // optional part of this pill, and the dots still say which workspace is which.
+    final showIcons = options.showWindowIcons && !module.compact;
     // The window snapshot is only watched when the icons are actually drawn: it
     // rebuilds on every window event, and a dot-only indicator has no reason to
     // pay for that.
-    final windows = options.showWindowIcons
+    final windows = showIcons
         ? ref.watch(
             shellControllerProvider.select((state) => state.openAppWindows),
           )
         : const <DenialWindow>[];
     final cells = <int, NeoWorkspaceCell>{
-      if (options.showWindowIcons)
+      if (showIcons)
         for (final cell in neoWorkspaceWindowCells(
           windows: <NeoWorkspaceWindow>[
             for (final window in windows)

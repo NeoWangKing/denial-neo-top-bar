@@ -154,7 +154,11 @@ class _LauncherContentState extends ConsumerState<_LauncherContent> {
     // The window list is the pill's second half, and the setting that turns it
     // off is about the *bar*, not about the data: the provider stays subscribed
     // either way so switching it back on is immediate.
-    final listed = options.showWindows ? ordered : const <ApplicationWindow>[];
+    // Over budget the strip is what goes: the mark alone still opens the
+    // launcher, and the window strip is the widest optional part of any pill.
+    final listed = options.showWindows && !module.compact
+        ? ordered
+        : const <ApplicationWindow>[];
     // A vertical pill has room for a handful of stacked icons, not ten: the bar
     // is a column there, and ten 20px tiles would make one pill taller than the
     // screen. The rest are still reachable by clicking the mark itself.

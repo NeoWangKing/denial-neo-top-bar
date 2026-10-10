@@ -95,16 +95,21 @@ class _MediaContent extends ConsumerWidget {
           ? Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 150),
-                  child: Text(
-                    label,
-                    style: ShellText.systemBarValue,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                // The title is the widest thing here and the artist/track can be
+                // read from the player itself, so it is what goes first when the
+                // bar is over budget: the transport stays.
+                if (!module.compact) ...[
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 150),
+                    child: Text(
+                      label,
+                      style: ShellText.systemBarValue,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-                ),
-                const SizedBox(width: 8),
+                  const SizedBox(width: 8),
+                ],
                 ...transport,
               ],
             )

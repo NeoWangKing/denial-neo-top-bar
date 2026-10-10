@@ -14,6 +14,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/config.dart';
+import '../core/bar_budget.dart';
 import '../core/bar_drag_layout.dart';
 import '../core/config_state.dart';
 import '../core/drop_target.dart';
@@ -201,6 +202,13 @@ class _BarContentState extends State<_BarContent>
   /// this bar applies — and not a number that could disagree with it.
   double _pillCrossExtent = 40;
 
+  /// Whether the bar is presenting its compact form.
+  ///
+  /// Decided from the pills measured on the *previous* frame and kept with
+  /// hysteresis (see `bar_budget.dart`): compacting makes every module narrower,
+  /// so a decision made from a single measurement would oscillate.
+  bool _compact = false;
+
   /// Measured size of each visible pill along the bar's main axis.
   ///
   /// Explicit positioning has to know a pill's size before placing it, and that
@@ -309,6 +317,9 @@ class _BarContentState extends State<_BarContent>
     // guess it from a `LayoutBuilder` that may or may not be inside the card's
     // padding.
     crossExtent: _pillCrossExtent,
+    // The bar's budget verdict, shared by every module of this bar: modules
+    // decide for themselves which of their parts is optional.
+    compact: _compact,
     options: id == null
         ? const <String, Object?>{}
         : widget.state.config.optionsOf(id),
@@ -336,6 +347,7 @@ class _BarContentState extends State<_BarContent>
       moduleContext.side,
       moduleContext.accent,
       moduleContext.density,
+      moduleContext.compact,
       moduleContext.optionsFingerprint,
     );
     if (_moduleCacheKey != key) {
@@ -596,6 +608,22 @@ class _BarContentState extends State<_BarContent>
               descriptors,
               moduleContext,
             );
+            // Budget: what the pills measured last frame want, against the room
+            // the strip actually has. Zero-extent pills are skipped by
+            // `neoRunExtent`, exactly as the layout skips them.
+            _compact = neoShouldCompact(
+              compact: _compact,
+              available: horizontal ? size.width : size.height,
+              needed:
+                  neoRunExtent(
+                    extents: <double>[
+                      for (final placement in visible)
+                        _pillExtents[placement.id] ?? 0,
+                    ],
+                    gap: _gap(density),
+                  ) +
+                  _mainPadding * 2,
+            );
 
             // Explicit positions whenever they are known, so that *any* change of
             // order animates — a drag, or a reorder from the settings card. The
@@ -625,6 +653,7 @@ class _BarContentState extends State<_BarContent>
               horizontal: horizontal,
               density: density,
               visible: visible,
+              constraints: constraints,
             );
           },
         ),
@@ -819,6 +848,7 @@ class _BarContentState extends State<_BarContent>
     required bool horizontal,
     required double density,
     required List<NeoModulePlacement> visible,
+    required BoxConstraints constraints,
   }) {
     final zones = <NeoZone, List<Widget>>{};
     final slots = <_PillSlot>[];
@@ -892,40 +922,60 @@ class _BarContentState extends State<_BarContent>
     final end = scrollable(group(NeoZone.end));
 
     // Three real zones: start hugs the leading edge, end hugs the trailing edge,
-    // and centre sits in the middle. A plain trailing-packed Flex would collapse
-    // all three into one run, which is not the layout the bar promises.
+    // and centre sits in the middle — but they now share one budget instead of
+    // overlapping each other.
+    //
+    // The rule is a priority order, not equal shares: **the end zone keeps its
+    // natural width**, because that is where the clock and the status glyphs are
+    // and they are the parts a user reads at a glance; the centre zone takes what
+    // is left and scrolls when even that is not enough; the start zone is capped
+    // at half the strip so a bar full of workspace icons cannot swallow the rest.
+    //
+    // The previous layout gave start and end a `Flexible(flex: 1)` each and let
+    // centre float over them in a `Stack`. Two consequences, both visible on a
+    // narrow output: the end zone was capped at half the strip and its *trailing*
+    // content — the clock — was scrolled out of sight, and a wide centre pill
+    // (media with a long title) simply painted over the end zone.
     //
     // `stretch` on the outer axis gives each zone the strip's full cross extent,
     // which the group's own stretch then passes down to the cards.
     final Widget layout;
+    final maxStartExtent =
+        (horizontal ? constraints.maxWidth : constraints.maxHeight) / 2;
     if (horizontal) {
-      layout = Stack(
-        fit: StackFit.expand,
+      layout = Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (start != null) Flexible(child: start),
-              if (end != null) Flexible(child: end),
-            ],
-          ),
-          if (center != null) Center(child: center),
+          if (start case final start?)
+            Flexible(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: maxStartExtent),
+                child: start,
+              ),
+            ),
+          if (center case final center?)
+            Expanded(
+              child: Align(alignment: Alignment.center, child: center),
+            ),
+          ?end,
         ],
       );
     } else {
-      layout = Stack(
-        fit: StackFit.expand,
+      layout = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Column(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (start != null) Flexible(child: start),
-              if (end != null) Flexible(child: end),
-            ],
-          ),
-          if (center != null) Center(child: center),
+          if (start case final start?)
+            Flexible(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: maxStartExtent),
+                child: start,
+              ),
+            ),
+          if (center case final center?)
+            Expanded(
+              child: Align(alignment: Alignment.center, child: center),
+            ),
+          ?end,
         ],
       );
     }

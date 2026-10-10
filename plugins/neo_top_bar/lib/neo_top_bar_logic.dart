@@ -4,6 +4,7 @@
 library;
 
 export 'src/core/bar_drag_layout.dart';
+export 'src/core/bar_budget.dart';
 export 'src/core/calendar_data.dart';
 export 'src/core/clock_options.dart';
 export 'src/core/config.dart';

@@ -1,14 +1,21 @@
 /// StatusNotifier tray. The host owns icon rendering, activation and menus; the
-/// bar only decides placement and whether the tray is shown at all.
+/// bar only decides placement, whether the tray is shown at all, and how many
+/// icons it keeps when the bar is over budget.
 library;
 
-import 'package:flutter/widgets.dart';
+import 'package:denial_flutter_sdk/popups.dart';
+import 'package:denial_flutter_sdk/theme.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/bar_budget.dart';
+import '../core/l10n_context.dart';
 import '../core/module.dart';
 import '../core/module_defaults.dart';
 import '../core/module_descriptor.dart';
+import '../widgets/neo_anchor.dart';
 import '../widgets/neo_card.dart';
+import '../widgets/neo_popup_surface.dart';
 
 class TrayModule implements NeoModule {
   const TrayModule();
@@ -31,13 +38,21 @@ class _TrayContent extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final s = context.neoStrings;
     final services = module.services;
     // The host's tray renderer does not decide its own visibility, so without
     // this a hidden or empty tray would leave a stray empty pill on the bar.
     if (!ref.watch(services.trayVisible)) return const SizedBox.shrink();
-    if (ref.watch(services.trayItemIds).isEmpty) {
-      return const SizedBox.shrink();
-    }
+    final ids = ref.watch(services.trayItemIds);
+    if (ids.isEmpty) return const SizedBox.shrink();
+
+    // Over budget: keep the leading icons and count the rest. The tray is the
+    // one pill whose width is dictated by other applications, so it gives way
+    // first — before media loses its title or the clock loses its date.
+    final collapse = module.compact && ids.length > neoTrayCompactLimit;
+    final shown = collapse ? ids.take(neoTrayCompactLimit).toList() : ids;
+    final hidden = ids.length - shown.length;
+
     return NeoCard(
       accent: module.accent,
       density: module.density,
@@ -47,7 +62,131 @@ class _TrayContent extends ConsumerWidget {
         horizontal: (module.horizontal ? 10 : 6) * module.density,
         vertical: module.horizontal ? 0 : 10 * module.density,
       ),
-      child: services.buildSystemTray(context, horizontal: module.horizontal),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          services.buildSystemTray(
+            context,
+            horizontal: module.horizontal,
+            itemIds: shown,
+          ),
+          if (hidden > 0) ...[
+            SizedBox(width: 6 * module.density),
+            _TrayOverflow(
+              count: hidden,
+              label: s.trayMoreIcons(hidden),
+              onPressed: () => _openTrayPanel(context, ids),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// The collapsed icons, in a panel the host renders.
+  ///
+  /// Not a second tray implementation: the same `buildSystemTray` draws them, so
+  /// activation, context menus and submenus behave exactly as they do on the bar.
+  void _openTrayPanel(BuildContext context, List<String> ids) {
+    final s = context.neoStrings;
+    final services = module.services;
+    final ref = ProviderScope.containerOf(context, listen: false);
+    ref
+        .read(shellPopupControllerProvider.notifier)
+        .show(
+          keyName: 'neo_top_bar.tray',
+          debugLabel: 'NeoTopBar tray overflow',
+          dismissPolicy: ShellDismissPolicy.outsideTapAndEscape,
+          barrierColor: Colors.transparent,
+          builder: (context, handle) => NeoPopupSurface(
+            services: services,
+            monitorId: module.monitorId,
+            anchor: neoAnchorRectOf(context),
+            maxWidth: 360,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        s.moduleLabel(NeoModuleIds.tray),
+                        style: ShellTheme.of(context).text.systemBarValue
+                            .copyWith(fontSize: 16),
+                      ),
+                    ),
+                    NeoPopupIconButton(
+                      icon: Icons.close,
+                      tooltip: s.close,
+                      onPressed: handle.close,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                services.buildSystemTray(
+                  context,
+                  horizontal: true,
+                  wrap: true,
+                  itemIds: ids,
+                ),
+              ],
+            ),
+          ),
+        );
+  }
+}
+
+/// The `+N` marker: says how many tray icons are collapsed, and opens them.
+class _TrayOverflow extends StatelessWidget {
+  const _TrayOverflow({
+    required this.count,
+    required this.label,
+    required this.onPressed,
+  });
+
+  final int count;
+  final String label;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShellTheme.of(context);
+    return Tooltip(
+      message: label,
+      child: Semantics(
+        button: true,
+        label: label,
+        onTap: onPressed,
+        child: ExcludeSemantics(
+          child: MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onPressed,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: theme.colors.tileOff,
+                  borderRadius: theme.borderRadius(theme.chipRadius),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  child: Text(
+                    '+$count',
+                    style: ShellText.systemBarCaption.copyWith(
+                      fontSize: 11,
+                      color: theme.colors.textSecondary,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

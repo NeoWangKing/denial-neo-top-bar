@@ -47,7 +47,9 @@ class _ClockContent extends ConsumerWidget {
     final now = ref.watch(module.services.clock).value;
     final options = neoClockOptions(module.options);
     final time = now == null ? null : _timeText(context, strings, now, options);
-    final date = now == null || !options.showDate
+    // Over budget the bar asks for the time only: the date is the widest part of
+    // this pill and the least urgent, and the calendar is still one click away.
+    final date = now == null || !options.showDate || module.compact
         ? null
         : neoFormatClockDate(
             format: options.dateFormat,
@@ -174,6 +176,12 @@ class _ClockSettings extends StatelessWidget {
                 ),
               ),
           ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          s.clockCompactNote,
+          style: ShellTheme.of(context).text.systemBarCaption
+              .copyWith(color: ShellTheme.of(context).colors.textTertiary),
         ),
       ],
     );

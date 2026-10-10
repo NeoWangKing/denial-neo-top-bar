@@ -425,6 +425,18 @@ class NeoStrings {
     'Up to three per workspace; the rest are counted as +N',
   );
 
+  String trayMoreIcons(int count) => isZh
+      ? '还有 $count 个图标'
+      : count == 1
+      ? '1 more icon'
+      : '$count more icons';
+
+  /// Said under the clock's date setting, because the bar can overrule it.
+  String get clockCompactNote => _t(
+    '空间不够时会自动只显示时间',
+    'When the bar runs out of room, only the time is shown',
+  );
+
   // ---------------------------------------------------------------------------
   // The control centre pill.
   // ---------------------------------------------------------------------------

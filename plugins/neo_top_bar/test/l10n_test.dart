@@ -168,6 +168,8 @@ _samples = <String, ({String zh, String en})>{
     en: en.pillGlyphsAtLeastOne,
   ),
   'batteryGlyphIcon': (zh: zh.batteryGlyphIcon, en: en.batteryGlyphIcon),
+  'clockCompactNote': (zh: zh.clockCompactNote, en: en.clockCompactNote),
+  'trayMoreIcons': (zh: zh.trayMoreIcons(2), en: en.trayMoreIcons(2)),
   'workspaceShowWindows': (
     zh: zh.workspaceShowWindows,
     en: en.workspaceShowWindows,

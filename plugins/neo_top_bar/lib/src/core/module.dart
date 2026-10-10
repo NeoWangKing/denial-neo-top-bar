@@ -92,6 +92,7 @@ class NeoModuleContext {
     required this.accent,
     required this.density,
     this.crossExtent = 40,
+    this.compact = false,
     this.options = const <String, Object?>{},
   });
 
@@ -127,6 +128,15 @@ class NeoModuleContext {
   /// neighbours' text.
   double glyphSize(double fraction, {double min = 14, double max = 30}) =>
       (crossExtent * fraction).clamp(min, max).toDouble();
+
+  /// Whether the bar is over budget and is asking modules to drop whatever
+  /// they only show when there is room.
+  ///
+  /// A module decides what that means for itself, because only it knows which
+  /// part of it is optional: the tray collapses icons, media drops the track
+  /// title, the clock drops the date. The bar never hides a whole pill on its
+  /// own — a module the user enabled stays visible, just smaller.
+  final bool compact;
 
   /// This module's stored settings, as the user left them.
   ///
