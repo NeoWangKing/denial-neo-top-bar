@@ -416,6 +416,16 @@ class NeoStrings {
       : '$count unread notifications';
 
   // ---------------------------------------------------------------------------
+  // The workspace pill.
+  // ---------------------------------------------------------------------------
+
+  String get workspaceShowWindows => _t('胶囊里显示窗口图标', 'Show window icons');
+  String get workspaceShowWindowsHint => _t(
+    '每个工作区最多 3 个，放不下的记成 +N',
+    'Up to three per workspace; the rest are counted as +N',
+  );
+
+  // ---------------------------------------------------------------------------
   // The control centre pill.
   // ---------------------------------------------------------------------------
 

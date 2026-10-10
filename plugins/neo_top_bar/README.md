@@ -15,7 +15,7 @@
 
 | 模块 | id | 区 | 默认 | 说明 |
 |---|---|---|---|---|
-| 工作区胶囊 | `workspaces` | 左 | 开 | 每个工作区一个圆点，当前工作区高亮，占用状态变实心；点击切换 |
+| 工作区胶囊 | `workspaces` | 左 | 开 | 每个工作区一个圆点，当前工作区高亮，占用状态变实心；点击切换；**可选**（默认关）在每个工作区里显示它自己的窗口图标，最多 3 个 + `+N` |
 | 应用启动器 | `launcher` | 中 | 开 | Arch Linux 图标 + **当前工作区每个窗口的图标**，点击图标聚焦该窗口、点击其余部分调 `services.toggleLauncher()`；胶囊宽度随窗口数动态伸缩，超过 10 个折叠成 `+N`；图标顺序按窗口**首次出现**固定，点谁都不会重排 |
 | 系统托盘 | `tray` | 右 | 开 | StatusNotifier 图标；托盘隐藏或为空时整块自动消失（**不会留下空位**） |
 | 通知 | `notifications` | 右 | 开 | 未读徽章 + 历史面板（逐条忽略 / 全部清除 / 免打扰） |
@@ -611,6 +611,30 @@ _grab       0 → 1，360ms + Motion.md3Emphasized
 
 **这一部分是纯布局，没有 widget 测试**：只能把系统栏挪到左边或右边，用眼睛验收。
 
+### 工作区胶囊：可选显示每个工作区的窗口图标
+
+默认**关**（打开之后胶囊会明显变宽），在**胶囊自己的设置**里开：右键工作区胶囊 → 展开设置 →
+「胶囊里显示窗口图标」。
+
+打开后，每个工作区格子本身就是一个小胶囊：**圆点 + 最多 3 个窗口图标 + `+N`**。规则都写在
+`core/workspace_windows.dart` 里（纯函数 + 单测），widget 只负责画：
+
+| 规则 | 行为 | 为什么 |
+|---|---|---|
+| 上限 3 | 放不下的记成 `+N` | 一个工作区格子是「大胶囊里的小胶囊」，超过 3 个就不再像一个工作区了 |
+| 排序 | 粘性窗口最前，其余按 `objectId` | 新开的窗口排到最后，已经在屏幕上的图标不会因为新开一个就重排 |
+| 粘性窗口（`pinned`） | 只画在**当前工作区**那一格 | 它在每个工作区都可见，画九遍就是同一个图标重复九次 |
+| 最小化窗口 | 留在它自己的工作区格里，半透明 | 胶囊报告的是「这个工作区有什么」，不只是「现在屏幕上有什么」 |
+| 只画本输出的窗口 | 按 `monitorId` 过滤 | 每个栏实例只管自己那块屏 |
+| 工作区已经不存在 | 直接不画 | 数量缩小时 compositor 会自己 clamp，这里只是兜底 |
+
+- **点图标 = 切到那个工作区 + 聚焦那个窗口**（粘性窗口已经在屏幕上，不切）；点格子其余部分 =
+  切工作区（原行为不变）。图标是更内层的手势，所以不会和格子的点击打架。
+- **只有"有图标"的格子才画填充**：没有窗口的工作区还是原来那个纯圆点，所以没开这项、或者开着
+  但工作区是空的时候，外观和以前**完全一致**。
+- **只在开关打开时才订阅窗口快照**：`shellControllerProvider` 每次窗口事件都会重建，纯圆点的
+  胶囊没必要付这个代价。
+
 ### 启动器的设置：图标来源与窗口列表
 
 | 选项 | 行为 |
@@ -819,24 +843,32 @@ class YourModule implements NeoModule, NeoModuleSettings {
 
 ## 已知限制
 
-1. **工作区胶囊仍然做不到"每个工作区各自显示图标"，但我之前给的结论是错的。**
-   我当时断言：`ApplicationWindow` 没有 workspace 字段，所以插件无法判断窗口属于哪个
-   工作区，必须等上游加字段。**这个判断是错的**——宿主自己的实现早就过滤好了：
+1. ~~**工作区胶囊做不到"每个工作区各自显示图标"**~~ —— **这条已经解决了**（见上文
+   「工作区胶囊：可选显示每个工作区的窗口图标」）。过程值得留个记录，因为中间有**两次**判断
+   都是错的：
 
-   ```dart
-   // denial_desktop/lib/src/core/shell_plugin_services.dart 的 _windows
-   if (window.monitorId == monitorId &&
-       (window.minimized || window.pinned ||
-        window.workspaceId == desktop.activeWorkspaceFor(monitorId)))
-   ```
+   - 第一次断言"`ApplicationWindow` 没有 workspace 字段，所以插件判断不了窗口属于哪个工作区，
+     必须等上游加字段"。**错**：`services.windows(monitorId)` 返回的本来就是"这块屏当前工作区的
+     窗口"（外加最小化和固定显示的），根本不需要那个字段：
 
-   也就是说 `services.windows(monitorId)` 返回的**就是**"这块屏当前工作区的窗口"
-   （外加最小化和固定显示的）。插件根本不需要那个字段。启动器胶囊现在正是用它显示
-   窗口图标（顺序另按"首次出现"固定，见上文）。
+     ```dart
+     // denial_desktop/lib/src/core/shell_plugin_services.dart 的 _windows
+     if (window.monitorId == monitorId &&
+         (window.minimized || window.pinned ||
+          window.workspaceId == desktop.activeWorkspaceFor(monitorId)))
+     ```
 
-   **仍然做不到的是其它工作区的窗口**：API 只暴露当前工作区的，
-   所以"工作区胶囊里每个工作区各自列自己的应用"还是需要上游补能力。
-   当前工作区胶囊只做数量/当前/占用/切换。
+   - 第二次断言"其它工作区的窗口拿不到，所以工作区胶囊里每个工作区各自列应用还是得等上游"。
+     **也错**：完整快照一直公开着，只是不在 `services.windows()` 那条路上——
+
+     ```dart
+     ref.watch(shellControllerProvider.select((s) => s.openAppWindows));  // 所有用户窗口
+     // 每个 DenialWindow 带 workspaceId / monitorId / minimized / pinned / objectId
+     // state.dart 导出 shellControllerProvider，models.dart 导出 DenialWindow
+     ```
+
+     于是最终是**纯插件**实现的，没碰上游。
+
 2. **无法添加内存 / 网络 / 磁盘模块**。`ShellTelemetryServices` 只提供
    `battery` / `cpu` / `gpus` / `clock` / `media`，插件拿不到这些数据源。
 3. **排序有两种方式**：在顶栏上**长按拖动胶囊**（推荐，可以跨区），或在设置面板里
