@@ -681,17 +681,27 @@ _grab       0 → 1，360ms + Motion.md3Emphasized
 #### 兜底布局（flex）必须和显式定位摆在同一位置
 
 胶囊大小是**上一帧**量到的，所以内容一变尺寸（包括阶梯升降），这一帧就退回 flex 布局重新量一次。
-这意味着两套布局会被来回切换，**它们必须把每个胶囊放在同一个位置**，否则每次切换都会
-看到"跳一下"（内屏上 start 区一堆工作区图标、end 区一堆状态图标，栏中央和 center 区真正可用
-空间的中央能差上百像素，最明显的就是启动器那颗胶囊）。
+这意味着两套布局会被来回切换，**它们必须把每个胶囊放在同一个位置**，否则每次切换都会看到"跳一下"。
 
 两套布局的规则现在是同一句话（`core/bar_drag_layout.dart` 的 `neoDragLayout` 和
-`_buildFlexLayout`）：
+`_buildFlexLayout`，共享 `neoZoneRuns` / `neoCentreRoom` / `neoCentreOffset` / `neoCentreAlign`）：
 
-- start 贴前缘，end 贴后缘，**center 居中于其余两区留出的空间**（不是屏幕中央）；
+- start 贴前缘，end 贴后缘；
+- **center 摆在「栏的中央」**（`neoCentreOffset`：`(栏宽 - center 宽度) / 2`）——用户就是这么读
+  它的，而且两边胶囊变宽变窄时它不会跟着漂；
+- 这个中央位置会被**夹进** `neoCentreRoom`（start、end 两条 run 留出的空间，各隔一个 `gap`）：
+  某一侧超过栏宽一半时，栏的中央会落在它里面，夹一下才不会把 center 压在邻居身上。超宽时
+  flex 布局里 center 是被压进这块空间滚动的，所以它只会在空间内滑动，永远不会盖住别人；
 - 相邻两区之间隔一个 `gap`，也就是 `neoPillsFit`/`neoRunExtent` 在跨区那一对胶囊之间算的那一个；
 - center 是唯一"吸收剩余空间"的那一区；如果 center 区什么都没画（比如启动器模块不可用），
   用一个 `Spacer` 顶替它，否则 end 会跑到 start 旁边而不是贴后缘。
+
+**这里踩过一个坑**：一开始把 center 改成"居中于它自己那块空间"，理由是"两套布局必须完全一致"。
+结果在 2560px 宽的外屏上，start 只有 100 多像素、end 有 700 多像素，于是"空间的中央"比"屏幕的
+中央"偏左一百多像素——启动器看起来被挤到一边去了。正确做法是两层：**目标是栏的中央，只有在
+中央被邻居占了的时候才退回空间内夹取**。flex 布局那边不是用 `Center` 而是给 `Align` 算了一个
+偏移量（`neoCentreAlign`），这样它能在自己那块空间里把 center 摆到栏的中央，两套布局逐像素一致
+（`test/config_test.dart` 里有一条"两套布局对 center 的结论必须相同"的property 测试钉住）。
 
 #### 顺带修掉的一个真 bug：兜底布局会把右端挤出屏幕
 

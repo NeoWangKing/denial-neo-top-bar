@@ -933,11 +933,12 @@ class _BarContentState extends State<_BarContent>
     final gap = _gap(density);
 
     // Three real zones: start hugs the leading edge, end hugs the trailing edge,
-    // and the centre zone sits centred in the room the other two leave it — the
-    // same slot `neoDragLayout` computes, so a pill does not move by a pixel when
-    // the bar switches between the two layouts (which it does in the frame a
-    // pill's size changes). That is why the gaps between neighbouring zones are
-    // spelled out here: they are part of the same budget `neoPillsFit` adds up.
+    // and the centre zone sits at `neoCentreOffset` — the middle of the strip —
+    // the same offset `neoDragLayout` computes, so a pill does not move by a
+    // pixel when the bar switches between the two layouts (which it does in the
+    // frame a pill's size changes). That is why the gaps between neighbouring
+    // zones are spelled out here: they are part of the same budget `neoPillsFit`
+    // adds up.
     //
     // The rule for the room itself is a priority order, not equal shares: **the
     // end zone keeps its natural width**, because that is where the clock and the
@@ -966,10 +967,61 @@ class _BarContentState extends State<_BarContent>
               child: start,
             ),
           );
+    // The centre zone can only be placed *inside* the room the other two leave,
+    // because that is the room the flex algorithm gives it — and that room is not
+    // centred on the strip when the zones differ in width (a wide tray against a
+    // narrow workspace pill), which is what used to park the launcher off to one
+    // side on a wide output. So the alignment itself carries the offset: the
+    // zone is nudged inside its room until it stands at the middle of the strip
+    // (or against the edge of the room when the middle is taken by a neighbour).
+    //
+    // The offsets come from the pills measured so far — a first frame has none,
+    // and then the middle of the strip is the answer anyway — while the room's
+    // *real* width comes from the layout itself, so this lands exactly where
+    // `neoDragLayout` puts the same pills.
+    final zoneRuns = neoZoneRuns(
+      pills: _pillBoxes(visible) ?? const <NeoPillBox>[],
+      gap: gap,
+    );
+    final centreRoom = neoCentreRoom(
+      mainExtent: horizontal ? constraints.maxWidth : constraints.maxHeight,
+      mainPadding: _mainPadding,
+      gap: gap,
+      runs: zoneRuns,
+    );
+    final centreOffset = neoCentreOffset(
+      mainExtent: horizontal ? constraints.maxWidth : constraints.maxHeight,
+      mainPadding: _mainPadding,
+      gap: gap,
+      runs: zoneRuns,
+    );
     final centerSlot = center == null
         ? null
         : Expanded(
-            child: Align(alignment: Alignment.center, child: center),
+            child: LayoutBuilder(
+              builder: (context, room) => Align(
+                alignment: horizontal
+                    ? Alignment(
+                        neoCentreAlign(
+                          offset: centreOffset - _mainPadding,
+                          roomLeft: centreRoom.left - _mainPadding,
+                          roomWidth: room.maxWidth,
+                          centreRun: zoneRuns.centre,
+                        ),
+                        0,
+                      )
+                    : Alignment(
+                        0,
+                        neoCentreAlign(
+                          offset: centreOffset - _mainPadding,
+                          roomLeft: centreRoom.left - _mainPadding,
+                          roomWidth: room.maxHeight,
+                          centreRun: zoneRuns.centre,
+                        ),
+                      ),
+                child: center,
+              ),
+            ),
           );
 
     final children = <Widget>[];

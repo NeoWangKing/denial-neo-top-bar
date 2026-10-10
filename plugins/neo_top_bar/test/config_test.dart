@@ -1004,21 +1004,54 @@ void main() {
       expect(placed['a']!.main, 450);
     });
 
-    test('centres the centre zone in the room the other zones leave', () {
-      // Not the middle of the strip: the flex layout gives the centre zone the
-      // room between the start and end runs, one gap away from each, and the
-      // two layouts have to agree or the pill would move whenever the bar
-      // switches between them.
+    test('puts the centre zone in the middle of the strip, not of its room', () {
+      // The middle of the strip is where a user reads the launcher as being, and
+      // it does not wander when the two other zones change width. The room the
+      // start and end runs leave is off centre whenever they differ, so centring
+      // the zone inside that room parked the launcher to one side on a wide
+      // output — a bug, not a preference.
       final placed = layout(const <NeoPillBox>[
         NeoPillBox(id: 'l', zone: NeoZone.start, extent: 100),
         NeoPillBox(id: 'm', zone: NeoZone.center, extent: 60),
         NeoPillBox(id: 'r', zone: NeoZone.end, extent: 80),
       ]);
-      // room = 1000 - 8 - (100 + 6) - (80 + 6) - 8 = 792, so the centre pill
-      // starts 114 into the strip and is centred in what is left of it.
       expect(placed['l']!.main, 8);
-      expect(placed['m']!.main, 114 + (792 - 60) / 2);
+      expect(placed['m']!.main, 470, reason: '(1000 - 60) / 2');
       expect(placed['r']!.main, 1000 - 8 - 80);
+    });
+
+    test('clamps the centre zone into its room when a neighbour takes the middle', () {
+      // A start run wider than half the strip: the middle of the strip is inside
+      // it, so the centre zone goes as close to the middle as the room allows —
+      // right up against the start run, never painting over it.
+      final placed = layout(const <NeoPillBox>[
+        NeoPillBox(id: 'l', zone: NeoZone.start, extent: 700),
+        NeoPillBox(id: 'm', zone: NeoZone.center, extent: 60),
+        NeoPillBox(id: 'r', zone: NeoZone.end, extent: 80),
+      ]);
+      expect(placed['l']!.main, 8);
+      expect(placed['m']!.main, 8 + 700 + 6);
+      expect(placed['r']!.main, 1000 - 8 - 80);
+    });
+
+    test('the middle of the strip is free unless a run crosses it', () {
+      // The fit test only promises that the three runs add up, so the middle of
+      // the strip can land inside a neighbour that takes more than half of it.
+      for (final extent in <double>[100, 300, 400, 450, 500, 700, 900]) {
+        final pills = <NeoPillBox>[
+          NeoPillBox(id: 'l', zone: NeoZone.start, extent: extent),
+          const NeoPillBox(id: 'm', zone: NeoZone.center, extent: 60),
+          const NeoPillBox(id: 'r', zone: NeoZone.end, extent: 80),
+        ];
+        final placed = layout(pills);
+        final middle = placed['m']!.main;
+        final overlapsStart = middle < 8 + extent + 6;
+        expect(
+          overlapsStart,
+          isFalse,
+          reason: 'start $extent: the centre zone painted over it',
+        );
+      }
     });
 
     test('a pill stays in its own room when the pills fit', () {
@@ -1172,6 +1205,148 @@ void main() {
       expect(placed['real']!.main, 450);
       expect(placed['ghost']!.main, 450);
     });
+  });
+
+  group('the two layouts agree on the centre zone', () {
+    // The flex layout can only place the centre zone *inside* the room the other
+    // two zones leave, while `neoDragLayout` places it at an absolute offset.
+    // The alignment is what bridges the two, so it has to land the zone exactly
+    // where the explicit layout would: otherwise the launcher jumps every time
+    // the bar measures a pill again (which it does in the frame a size changes).
+    const padding = 8.0;
+    const gap = 6.0;
+    const mainExtent = 1000.0;
+
+    /// A lopsided but roomy bar: the middle of the strip is nowhere near the
+    /// middle of the centre zone's room, which is what used to park the launcher
+    /// off to one side on a wide output.
+    const lopsided = <NeoPillBox>[
+      NeoPillBox(id: 'l', zone: NeoZone.start, extent: 200),
+      NeoPillBox(id: 'm', zone: NeoZone.center, extent: 44),
+      NeoPillBox(id: 'r', zone: NeoZone.end, extent: 400),
+    ];
+
+    test('the alignment lands the centre run on the explicit offset', () {
+      for (final pills in <List<NeoPillBox>>[
+        lopsided,
+        const <NeoPillBox>[
+          NeoPillBox(id: 'l', zone: NeoZone.start, extent: 700),
+          NeoPillBox(id: 'm', zone: NeoZone.center, extent: 60),
+          NeoPillBox(id: 'r', zone: NeoZone.end, extent: 80),
+        ],
+        const <NeoPillBox>[
+          NeoPillBox(id: 'l', zone: NeoZone.start, extent: 300),
+          NeoPillBox(id: 'm', zone: NeoZone.center, extent: 200),
+          NeoPillBox(id: 'r', zone: NeoZone.end, extent: 300),
+        ],
+        const <NeoPillBox>[
+          NeoPillBox(id: 'm', zone: NeoZone.center, extent: 120),
+          NeoPillBox(id: 'r', zone: NeoZone.end, extent: 320),
+        ],
+        const <NeoPillBox>[
+          NeoPillBox(id: 'l', zone: NeoZone.start, extent: 320),
+          NeoPillBox(id: 'm', zone: NeoZone.center, extent: 120),
+        ],
+        // Over budget: the room is not a room at all, and the centre zone fills
+        // whatever the layouts give it instead of being nudged anywhere.
+        const <NeoPillBox>[
+          NeoPillBox(id: 'l', zone: NeoZone.start, extent: 600),
+          NeoPillBox(id: 'm', zone: NeoZone.center, extent: 300),
+          NeoPillBox(id: 'r', zone: NeoZone.end, extent: 300),
+        ],
+      ]) {
+        final runs = neoZoneRuns(pills: pills, gap: gap);
+        final room = neoCentreRoom(
+          mainExtent: mainExtent,
+          mainPadding: padding,
+          gap: gap,
+          runs: runs,
+        );
+        final offset = neoCentreOffset(
+          mainExtent: mainExtent,
+          mainPadding: padding,
+          gap: gap,
+          runs: runs,
+        );
+        final placed = neoDragLayout(
+          pills: pills,
+          mainExtent: mainExtent,
+          crossExtent: 55,
+          mainPadding: padding,
+          crossPadding: 5,
+          gap: gap,
+        );
+        final centreId = pills
+            .firstWhere((pill) => pill.zone == NeoZone.center)
+            .id;
+        expect(placed[centreId]!.main, offset, reason: '$pills');
+
+        // What the flex layout does with that offset, in the room it gives the
+        // centre zone: `Align` slides the child inside that room.
+        final align = neoCentreAlign(
+          offset: offset - padding,
+          roomLeft: room.left - padding,
+          roomWidth: room.right - room.left,
+          centreRun: runs.centre,
+        );
+        expect(align, inInclusiveRange(-1.0, 1.0), reason: '$pills');
+        if (room.right - room.left >= runs.centre) {
+          final flex =
+              room.left +
+              (room.right - room.left - runs.centre) * (align + 1) / 2;
+          expect(flex, closeTo(offset, 0.0001), reason: '$pills');
+        } else {
+          // No room to slide in: the zone is squeezed into the room it is given,
+          // so it stands at the room's leading edge — which is where the explicit
+          // layout clamps it too.
+          expect(align, 0, reason: '$pills has no room to slide in');
+          expect(offset, closeTo(room.left, 0.0001), reason: '$pills');
+        }
+      }
+    });
+
+    test('a roomy lopsided bar gets the middle of the strip', () {
+      final runs = neoZoneRuns(pills: lopsided, gap: gap);
+      final offset = neoCentreOffset(
+        mainExtent: mainExtent,
+        mainPadding: padding,
+        gap: gap,
+        runs: runs,
+      );
+      expect(offset, 478, reason: 'the middle of the strip, not of the room');
+      // The room the other zones leave starts at 214 and ends at 586, so a
+      // room-centred launcher would sit at 378 — a hundred pixels off, which is
+      // exactly what a user notices.
+      final room = neoCentreRoom(
+        mainExtent: mainExtent,
+        mainPadding: padding,
+        gap: gap,
+        runs: runs,
+      );
+      expect(room.left + (room.right - room.left - runs.centre) / 2, 378);
+    });
+
+    test(
+      'a neighbour across the middle pushes the centre zone aside, not under',
+      () {
+        final pills = <NeoPillBox>[
+          const NeoPillBox(id: 'l', zone: NeoZone.start, extent: 700),
+          const NeoPillBox(id: 'm', zone: NeoZone.center, extent: 60),
+          const NeoPillBox(id: 'r', zone: NeoZone.end, extent: 80),
+        ];
+        final runs = neoZoneRuns(pills: pills, gap: gap);
+        expect(
+          neoCentreOffset(
+            mainExtent: mainExtent,
+            mainPadding: padding,
+            gap: gap,
+            runs: runs,
+          ),
+          714,
+          reason: 'as close to the middle as the room allows',
+        );
+      },
+    );
   });
 
   group('neoPillsFit', () {
