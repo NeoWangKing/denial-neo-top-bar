@@ -76,7 +76,6 @@ class _TrayContent extends ConsumerWidget {
             SizedBox(width: 6 * module.density),
             _TrayOverflow(
               label: s.trayMoreIcons(hidden),
-              size: module.glyphSize(0.4, min: 12, max: 18),
               onPressed: () => _openTrayPanel(context, ids),
             ),
           ],
@@ -85,20 +84,25 @@ class _TrayContent extends ConsumerWidget {
     );
   }
 
-  /// The collapsed icons, in a panel the host renders.
+  /// The collapsed icons, in a flyout the host renders.
   ///
   /// Not a second tray implementation: the same `buildSystemTray` draws them, so
   /// activation, context menus and submenus behave exactly as they do on the bar.
+  ///
+  /// Nothing else goes in this card — no title, no close button. It is a tray
+  /// overflow, not a panel: Windows' flyout is the same thing, a small grid of
+  /// icons whose dismissal is the click outside (or Escape) that the shell's
+  /// dismiss policy already gives it, and a header only made a mostly empty card
+  /// out of four icons. The width hugs the grid for the same reason.
   void _openTrayPanel(BuildContext context, List<String> ids) {
-    final s = context.neoStrings;
     final services = module.services;
     final ref = ProviderScope.containerOf(context, listen: false);
     // The pill's rectangle has to be read *here*, on the bar's own context.
     // Inside the builder below, `context` is the popup host's: its box is the
     // whole scene, so anchoring to it put this panel in the middle of the screen
     // (`neoAnchoredPopupPlacement` finds no room beside a scene-sized anchor and
-    // the card falls back to centering). The builder keeps that context for its
-    // theme, which lives in the popup layer.
+    // the card falls back to centering). The builder keeps that context for the
+    // host's tray, which needs the popup layer's providers.
     final anchor = neoAnchorRectOf(context);
     ref
         .read(shellPopupControllerProvider.notifier)
@@ -107,62 +111,65 @@ class _TrayContent extends ConsumerWidget {
           debugLabel: 'NeoTopBar tray overflow',
           dismissPolicy: ShellDismissPolicy.outsideTapAndEscape,
           barrierColor: Colors.transparent,
-          builder: (context, handle) => NeoPopupSurface(
+          builder: (context, _) => NeoPopupSurface(
             services: services,
             monitorId: module.monitorId,
             anchor: anchor,
-            maxWidth: 360,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        s.moduleLabel(NeoModuleIds.tray),
-                        style: ShellTheme.of(context).text.systemBarValue
-                            .copyWith(fontSize: 16),
-                      ),
-                    ),
-                    NeoPopupIconButton(
-                      icon: Icons.close,
-                      tooltip: s.close,
-                      onPressed: handle.close,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                services.buildSystemTray(
-                  context,
-                  horizontal: true,
-                  wrap: true,
-                  itemIds: ids,
-                ),
-              ],
+            padding: const EdgeInsets.all(_trayFlyoutPadding),
+            maxWidth: _trayFlyoutWidth(ids.length),
+            child: services.buildSystemTray(
+              context,
+              horizontal: true,
+              wrap: true,
+              itemIds: ids,
             ),
           ),
         );
   }
 }
 
+/// Side of one tray icon, as the host renders it.
+///
+/// `SystemTrayModule` puts every icon in a `SizedBox.square(dimension: 22)`,
+/// whatever the bar's thickness is, and its `Wrap` keeps 8 between them — so
+/// these two numbers describe the flyout's content, not this plugin's taste.
+const double _trayIconExtent = 22;
+const double _trayIconGap = 8;
+
+/// Padding between the flyout's edge and the icon grid.
+///
+/// Tighter than `NeoPopupSurface`'s panel default, which is sized for a card
+/// with a header and rows of text.
+const double _trayFlyoutPadding = 10;
+
+/// How many icons share a row before the grid wraps.
+const int _trayFlyoutColumns = 4;
+
+/// The width of the tray flyout for [count] icons.
+///
+/// The card is placed with a *fixed* width, so it has to be the grid's own width
+/// — a generous `maxWidth` is what left four icons floating in a 360px card. The
+/// host's `Wrap` takes over past [_trayFlyoutColumns].
+double _trayFlyoutWidth(int count) {
+  final columns = count.clamp(1, _trayFlyoutColumns);
+  return _trayFlyoutPadding * 2 +
+      columns * _trayIconExtent +
+      (columns - 1) * _trayIconGap;
+}
+
 /// The chevron that opens the collapsed icons.
 ///
-/// A downward arrow rather than the `+N` it used to print, because the panel it
+/// A downward arrow rather than the `+N` it used to print, because the flyout it
 /// opens hangs *below* the pill: the arrow says where the rest of the icons are,
 /// and how many there are is in the tooltip and in the label a screen reader
-/// reads. Windows' tray overflow is the same idea.
+/// reads. Windows' tray overflow is the same idea, down to the bare glyph: no
+/// chip behind it, because the icons beside it have none either — the host draws
+/// them as plain 22px squares — and a filled tile among them reads as another
+/// status icon rather than as the way to the rest.
 class _TrayOverflow extends StatelessWidget {
-  const _TrayOverflow({
-    required this.label,
-    required this.size,
-    required this.onPressed,
-  });
+  const _TrayOverflow({required this.label, required this.onPressed});
 
   final String label;
-
-  /// Glyph size, derived from the pill's own thickness like every other icon.
-  final double size;
 
   final VoidCallback onPressed;
 
@@ -181,24 +188,16 @@ class _TrayOverflow extends StatelessWidget {
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: onPressed,
-              // The tile keeps the tap target wider than the glyph, and keeps the
-              // chevron readable against a busy tray: it is a control, not a
-              // status icon.
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: theme.colors.tileOff,
-                  borderRadius: theme.borderRadius(theme.chipRadius),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 5,
-                    vertical: 2,
-                  ),
-                  child: Icon(
-                    Icons.keyboard_arrow_down,
-                    size: size,
-                    color: theme.colors.textSecondary,
-                  ),
+              // The same box the host gives each icon, so the chevron sits on the
+              // same rhythm as its neighbours and has the same tap target; the
+              // glyph inside is smaller, which is what makes it read as an arrow
+              // and not as one more 22px icon.
+              child: SizedBox.square(
+                dimension: _trayIconExtent,
+                child: Icon(
+                  Icons.keyboard_arrow_down,
+                  size: 18,
+                  color: theme.colors.textSecondary,
                 ),
               ),
             ),
