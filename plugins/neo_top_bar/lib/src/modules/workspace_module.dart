@@ -226,6 +226,14 @@ class _WorkspaceCell extends StatelessWidget {
     final hidden = cell?.hidden ?? 0;
     final iconSize = module.glyphSize(0.40, min: 10, max: 16);
     final gap = 3 * module.density;
+    // Icons are the cell's content once it has any: a dot beside them only
+    // repeats what the icons already say, and it costs width the icons want.
+    // An empty cell has nothing else to draw, so it keeps the dot — that is how
+    // "there is a workspace here, it is just empty" stays readable, and how the
+    // active cell stays identifiable when the workspace it points at is empty.
+    final hasIcons = windows.isNotEmpty;
+    final withIcons = cell != null;
+    final filled = withIcons && (hasIcons || active);
 
     // Plain painted boxes: no blur, no offscreen layer. Switching workspaces
     // animates a size change only, which keeps the indicator allocation-free.
@@ -241,16 +249,19 @@ class _WorkspaceCell extends StatelessWidget {
     );
 
     final content = <Widget>[
-      SizedBox(
-        width: horizontal ? 22 : 18,
-        height: horizontal ? 18 : 22,
-        child: Center(child: dot),
-      ),
+      if (!hasIcons)
+        SizedBox(
+          width: horizontal ? 22 : 18,
+          height: horizontal ? 18 : 22,
+          child: Center(child: dot),
+        ),
     ];
     for (final window in windows) {
-      content.add(
-        SizedBox(width: horizontal ? gap : 0, height: horizontal ? 0 : gap),
-      );
+      if (content.isNotEmpty) {
+        content.add(
+          SizedBox(width: horizontal ? gap : 0, height: horizontal ? 0 : gap),
+        );
+      }
       content.add(
         _WorkspaceWindowIcon(
           window: window,
@@ -292,16 +303,17 @@ class _WorkspaceCell extends StatelessWidget {
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 160),
               curve: Curves.easeOut,
-              // The fill only appears once a cell has icons to hold: a dot-only
-              // indicator keeps the bare look it has always had.
-              padding: windows.isEmpty
-                  ? EdgeInsets.zero
-                  : EdgeInsets.symmetric(
+              // The fill marks a cell that holds something, and the active cell
+              // even when it is empty. A dot-only indicator (the option off)
+              // keeps the bare look it has always had.
+              padding: filled
+                  ? EdgeInsets.symmetric(
                       horizontal: (horizontal ? 5 : 3) * module.density,
                       vertical: (horizontal ? 3 : 5) * module.density,
-                    ),
+                    )
+                  : EdgeInsets.zero,
               decoration: BoxDecoration(
-                color: windows.isEmpty
+                color: !filled
                     ? const Color(0x00000000)
                     : active
                     ? accent.cardFill(theme).withValues(alpha: 0.55)
