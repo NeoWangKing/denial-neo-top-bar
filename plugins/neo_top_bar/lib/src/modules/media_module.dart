@@ -8,6 +8,7 @@ import 'package:denial_flutter_sdk/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/bar_budget.dart';
 import '../core/l10n_context.dart';
 import '../core/module.dart';
 import '../core/module_defaults.dart';
@@ -98,7 +99,7 @@ class _MediaContent extends ConsumerWidget {
                 // The title is the widest thing here and the artist/track can be
                 // read from the player itself, so it is what goes first when the
                 // bar is over budget: the transport stays.
-                if (!module.compact) ...[
+                if (module.concession < NeoConcession.mediaTitle) ...[
                   ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 150),
                     child: Text(

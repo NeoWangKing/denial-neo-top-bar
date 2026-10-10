@@ -92,7 +92,7 @@ class NeoModuleContext {
     required this.accent,
     required this.density,
     this.crossExtent = 40,
-    this.compact = false,
+    this.concession = 0,
     this.options = const <String, Object?>{},
   });
 
@@ -129,14 +129,16 @@ class NeoModuleContext {
   double glyphSize(double fraction, {double min = 14, double max = 30}) =>
       (crossExtent * fraction).clamp(min, max).toDouble();
 
-  /// Whether the bar is over budget and is asking modules to drop whatever
-  /// they only show when there is room.
+  /// Whether the bar is over budget is not a yes/no question, so this is how far
+  /// down `NeoConcession`'s ladder the bar has had to go: 0 is the full bar, and
+  /// each step takes something away from one module.
   ///
   /// A module decides what that means for itself, because only it knows which
-  /// part of it is optional: the tray collapses icons, media drops the track
-  /// title, the clock drops the date. The bar never hides a whole pill on its
-  /// own — a module the user enabled stays visible, just smaller.
-  final bool compact;
+  /// part of it is optional and what that part is worth: the tray collapses
+  /// icons, media drops the track title, the clock drops the date. The bar never
+  /// hides a whole pill on its own — a module the user enabled stays visible,
+  /// just smaller.
+  final int concession;
 
   /// This module's stored settings, as the user left them.
   ///

@@ -49,7 +49,9 @@ class _TrayContent extends ConsumerWidget {
     // Over budget: keep the leading icons and count the rest. The tray is the
     // one pill whose width is dictated by other applications, so it gives way
     // first — before media loses its title or the clock loses its date.
-    final collapse = module.compact && ids.length > neoTrayCompactLimit;
+    final collapse =
+        module.concession >= NeoConcession.tray &&
+        ids.length > neoTrayCompactLimit;
     final shown = collapse ? ids.take(neoTrayCompactLimit).toList() : ids;
     final hidden = ids.length - shown.length;
 

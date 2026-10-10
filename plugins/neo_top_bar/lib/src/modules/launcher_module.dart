@@ -26,6 +26,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
+import '../core/bar_budget.dart';
 import '../core/launcher_options.dart';
 import '../core/l10n_context.dart';
 import '../core/module.dart';
@@ -156,7 +157,9 @@ class _LauncherContentState extends ConsumerState<_LauncherContent> {
     // either way so switching it back on is immediate.
     // Over budget the strip is what goes: the mark alone still opens the
     // launcher, and the window strip is the widest optional part of any pill.
-    final listed = options.showWindows && !module.compact
+    final listed =
+        options.showWindows &&
+            module.concession < NeoConcession.launcherStrip
         ? ordered
         : const <ApplicationWindow>[];
     // A vertical pill has room for a handful of stacked icons, not ten: the bar

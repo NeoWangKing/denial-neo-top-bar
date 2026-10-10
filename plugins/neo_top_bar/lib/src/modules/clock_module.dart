@@ -7,6 +7,7 @@ import 'package:denial_flutter_sdk/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/bar_budget.dart';
 import '../core/clock_options.dart';
 import '../core/l10n_context.dart';
 import '../core/module.dart';
@@ -49,7 +50,10 @@ class _ClockContent extends ConsumerWidget {
     final time = now == null ? null : _timeText(context, strings, now, options);
     // Over budget the bar asks for the time only: the date is the widest part of
     // this pill and the least urgent, and the calendar is still one click away.
-    final date = now == null || !options.showDate || module.compact
+    final date =
+        now == null ||
+            !options.showDate ||
+            module.concession >= NeoConcession.clockDate
         ? null
         : neoFormatClockDate(
             format: options.dateFormat,

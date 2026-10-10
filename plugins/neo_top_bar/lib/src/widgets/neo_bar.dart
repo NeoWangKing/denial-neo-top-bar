@@ -202,13 +202,13 @@ class _BarContentState extends State<_BarContent>
   /// this bar applies — and not a number that could disagree with it.
   double _pillCrossExtent = 40;
 
-  /// The bar's budget, and with it whether the bar is presenting its compact
-  /// form.
+  /// The bar's budget, and with it how far down the concession ladder the bar
+  /// has had to go.
   ///
   /// The decision itself lives in `bar_budget.dart`, where it is pure and
-  /// testable: it has to remember what the bar would need *without* the compact
-  /// form, or the two presentations would keep handing the decision back and
-  /// forth every frame. See [NeoBarBudget.observe].
+  /// testable: it has to remember what each step was worth when the bar took it,
+  /// or two presentations would keep handing the decision back and forth every
+  /// frame. See [NeoBarBudget.observe].
   final NeoBarBudget _budget = NeoBarBudget();
 
   /// Measured size of each visible pill along the bar's main axis.
@@ -321,7 +321,7 @@ class _BarContentState extends State<_BarContent>
     crossExtent: _pillCrossExtent,
     // The bar's budget verdict, shared by every module of this bar: modules
     // decide for themselves which of their parts is optional.
-    compact: _budget.compact,
+    concession: _budget.level,
     options: id == null
         ? const <String, Object?>{}
         : widget.state.config.optionsOf(id),
@@ -349,7 +349,7 @@ class _BarContentState extends State<_BarContent>
       moduleContext.side,
       moduleContext.accent,
       moduleContext.density,
-      moduleContext.compact,
+      moduleContext.concession,
       moduleContext.optionsFingerprint,
     );
     if (_moduleCacheKey != key) {
@@ -614,8 +614,8 @@ class _BarContentState extends State<_BarContent>
             // they took, against the room the strip actually has. Zero-extent
             // pills are skipped by `neoRunExtent`, exactly as the layouts skip
             // them. The same total decides whether the pills fit (below, through
-            // `neoPillsFit`) and whether the modules have to give up their
-            // optional parts, so the two can never answer differently.
+            // `neoPillsFit`) and whether a module has to give something up, so
+            // the two can never answer differently.
             final available = horizontal ? size.width : size.height;
             final needed =
                 neoRunExtent(
@@ -626,21 +626,21 @@ class _BarContentState extends State<_BarContent>
                   gap: _gap(density),
                 ) +
                 _mainPadding * 2;
-            final wasCompact = _budget.compact;
+            final previousLevel = _budget.level;
             _budget.observe(available: available, needed: needed);
-            // A presentation change is a content change: the pills that are
+            // A step down the ladder is a content change: the pills that are
             // about to render have not been measured in their new form yet, so
             // this frame is measured by the flex layout instead of being placed
-            // by the sizes of the presentation it just left.
-            final presentationChanged = _budget.compact != wasCompact;
+            // by the sizes of the step it just left.
+            final levelChanged = _budget.level != previousLevel;
 
             // Explicit positions whenever they are known, so that *any* change of
             // order animates — a drag, or a reorder from the settings card. The
-            // flex layout is the fallback for the first frame, for the frame a
-            // presentation changes, and for a bar whose content is too wide to
-            // place, where scrolling matters more than animation.
+            // flex layout is the fallback for the first frame, for the frame the
+            // ladder moves, and for a bar whose content is too wide to place,
+            // where scrolling matters more than animation.
             final boxes = _pillBoxes(visible);
-            if (!presentationChanged &&
+            if (!levelChanged &&
                 boxes != null &&
                 neoPillsFit(
                   pills: boxes,

@@ -17,6 +17,7 @@ import 'package:denial_flutter_sdk/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/bar_budget.dart';
 import '../core/l10n_context.dart';
 import '../core/module.dart';
 import '../core/module_defaults.dart';
@@ -84,7 +85,9 @@ class _WorkspaceContent extends ConsumerWidget {
     final options = neoWorkspaceOptions(module.options);
     // Over budget the cells fall back to plain dots: the icons are the widest
     // optional part of this pill, and the dots still say which workspace is which.
-    final showIcons = options.showWindowIcons && !module.compact;
+    final showIcons =
+        options.showWindowIcons &&
+        module.concession < NeoConcession.workspaceIcons;
     // The window snapshot is only watched when the icons are actually drawn: it
     // rebuilds on every window event, and a dot-only indicator has no reason to
     // pay for that.
