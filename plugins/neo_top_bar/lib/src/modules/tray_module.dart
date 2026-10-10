@@ -75,8 +75,8 @@ class _TrayContent extends ConsumerWidget {
           if (hidden > 0) ...[
             SizedBox(width: 6 * module.density),
             _TrayOverflow(
-              count: hidden,
               label: s.trayMoreIcons(hidden),
+              size: module.glyphSize(0.4, min: 12, max: 18),
               onPressed: () => _openTrayPanel(context, ids),
             ),
           ],
@@ -93,6 +93,13 @@ class _TrayContent extends ConsumerWidget {
     final s = context.neoStrings;
     final services = module.services;
     final ref = ProviderScope.containerOf(context, listen: false);
+    // The pill's rectangle has to be read *here*, on the bar's own context.
+    // Inside the builder below, `context` is the popup host's: its box is the
+    // whole scene, so anchoring to it put this panel in the middle of the screen
+    // (`neoAnchoredPopupPlacement` finds no room beside a scene-sized anchor and
+    // the card falls back to centering). The builder keeps that context for its
+    // theme, which lives in the popup layer.
+    final anchor = neoAnchorRectOf(context);
     ref
         .read(shellPopupControllerProvider.notifier)
         .show(
@@ -103,7 +110,7 @@ class _TrayContent extends ConsumerWidget {
           builder: (context, handle) => NeoPopupSurface(
             services: services,
             monitorId: module.monitorId,
-            anchor: neoAnchorRectOf(context),
+            anchor: anchor,
             maxWidth: 360,
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -139,16 +146,24 @@ class _TrayContent extends ConsumerWidget {
   }
 }
 
-/// The `+N` marker: says how many tray icons are collapsed, and opens them.
+/// The chevron that opens the collapsed icons.
+///
+/// A downward arrow rather than the `+N` it used to print, because the panel it
+/// opens hangs *below* the pill: the arrow says where the rest of the icons are,
+/// and how many there are is in the tooltip and in the label a screen reader
+/// reads. Windows' tray overflow is the same idea.
 class _TrayOverflow extends StatelessWidget {
   const _TrayOverflow({
-    required this.count,
     required this.label,
+    required this.size,
     required this.onPressed,
   });
 
-  final int count;
   final String label;
+
+  /// Glyph size, derived from the pill's own thickness like every other icon.
+  final double size;
+
   final VoidCallback onPressed;
 
   @override
@@ -166,6 +181,9 @@ class _TrayOverflow extends StatelessWidget {
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: onPressed,
+              // The tile keeps the tap target wider than the glyph, and keeps the
+              // chevron readable against a busy tray: it is a control, not a
+              // status icon.
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   color: theme.colors.tileOff,
@@ -173,15 +191,13 @@ class _TrayOverflow extends StatelessWidget {
                 ),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
+                    horizontal: 5,
                     vertical: 2,
                   ),
-                  child: Text(
-                    '+$count',
-                    style: ShellText.systemBarCaption.copyWith(
-                      fontSize: 11,
-                      color: theme.colors.textSecondary,
-                    ),
+                  child: Icon(
+                    Icons.keyboard_arrow_down,
+                    size: size,
+                    color: theme.colors.textSecondary,
                   ),
                 ),
               ),
