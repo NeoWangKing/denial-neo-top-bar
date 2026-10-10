@@ -180,6 +180,7 @@ DENIAL_PLUGIN_DART="$(command -v dart)"
 
 ```sh
 "$DENIAL_PLUGIN_DART" --packages=.dart_tool/package_config.json test/config_test.dart
+"$DENIAL_PLUGIN_DART" --packages=.dart_tool/package_config.json test/bar_budget_test.dart
 "$DENIAL_PLUGIN_DART" --packages=.dart_tool/package_config.json test/popup_geometry_test.dart
 "$DENIAL_PLUGIN_DART" --packages=.dart_tool/package_config.json test/preferences_test.dart
 "$DENIAL_PLUGIN_DART" --packages=.dart_tool/package_config.json test/window_order_test.dart
@@ -232,6 +233,7 @@ lib/
     preferences.dart        配置文件读写（原子写、保留未知键、写合并）
     drop_target.dart        落点解析（先判区，再判区内间隙）
     bar_drag_layout.dart    三个区的几何：显式坐标 / 拖动预览共用
+    bar_budget.dart         空间预算：什么时候让步、记忆怎么防抖（不引 dart:ui，可单测）
     popup_geometry.dart     面板锚定几何（不引 dart:ui，可单测）
     window_order.dart       启动器窗口图标的稳定顺序（不引 dart:ui，可单测）
     control_center_model.dart 控制中心的纯逻辑（列表排序、主题切换、有线判定、确认规则、选项解析）
@@ -653,12 +655,37 @@ _grab       0 → 1，360ms + Motion.md3Emphasized
 | 4 | 启动器 | 去掉窗口图标条，只留那个图标（点它照样开启动器） |
 | 5 | 工作区 | 关掉每个格子里的窗口图标，退回纯圆点 |
 
-判定在 `core/bar_budget.dart`（纯函数 + 单测）：测量上一帧每个胶囊的主轴尺寸，和栏的实际
-宽度比；`needed > available` 就进紧凑模式，但**要退出紧凑模式必须多出 32px 余量**——因为紧凑
-之后每个模块都会变窄，没有这个滞后就会一帧进一帧出地抖。
+判定在 `core/bar_budget.dart`（纯类 + 单测）。这里有个**非做不可**的细节：不能拿"紧凑状态下
+测出来的宽度"去判断能不能退出紧凑模式——紧凑之后每个模块都会变窄，所以紧凑态的胶囊**按定义**
+一定装得下；那样判就会：退出 → 下一帧发现又超了 → 再进 → 无限循环，一帧进一帧出地抖，而且
+每一帧都用另一套尺寸定位，胶囊看起来还会互相压。所以栏记的是一个**估算**：
+
+| 状态 | 估算 `naturalNeed` | 说明 |
+|---|---|---|
+| 非紧凑 | 就是本帧实测宽度 | 这是真的自然宽度 |
+| 紧凑 | `本帧实测 + saving` | `saving` 是进入紧凑那一帧量到的"紧凑省下了多少" |
+
+于是：进紧凑是**立即**的（内容正在被挤出屏幕），退出必须在**自然宽度**上还多出 32px 余量
+（`neoCompactSlack`）。内容在紧凑期间变小时（媒体停了、托盘少了图标），实测宽度会变小，估算
+跟着变小，所以栏仍然能自己走回来——不会"卡死在紧凑态"。
 
 模块自己决定"哪一部分是可选的"（`NeoModuleContext.compact`），栏**不会**因此隐藏整个胶囊：
 用户开着的模块永远在，只是变小。
+
+#### 兜底布局（flex）必须和显式定位摆在同一位置
+
+胶囊大小是**上一帧**量到的，所以内容一变尺寸（包括紧凑态切换），这一帧就退回 flex 布局重新
+量一次。这意味着两套布局会被来回切换，**它们必须把每个胶囊放在同一个位置**，否则每次切换都会
+看到"跳一下"（内屏上 start 区一堆工作区图标、end 区一堆状态图标，栏中央和 center 区真正可用
+空间的中央能差上百像素，最明显的就是启动器那颗胶囊）。
+
+两套布局的规则现在是同一句话（`core/bar_drag_layout.dart` 的 `neoDragLayout` 和
+`_buildFlexLayout`）：
+
+- start 贴前缘，end 贴后缘，**center 居中于其余两区留出的空间**（不是屏幕中央）；
+- 相邻两区之间隔一个 `gap`，也就是 `neoPillsFit`/`neoRunExtent` 在跨区那一对胶囊之间算的那一个；
+- center 是唯一"吸收剩余空间"的那一区；如果 center 区什么都没画（比如启动器模块不可用），
+  用一个 `Spacer` 顶替它，否则 end 会跑到 start 旁边而不是贴后缘。
 
 #### 顺带修掉的一个真 bug：兜底布局会把右端挤出屏幕
 

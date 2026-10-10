@@ -202,12 +202,14 @@ class _BarContentState extends State<_BarContent>
   /// this bar applies — and not a number that could disagree with it.
   double _pillCrossExtent = 40;
 
-  /// Whether the bar is presenting its compact form.
+  /// The bar's budget, and with it whether the bar is presenting its compact
+  /// form.
   ///
-  /// Decided from the pills measured on the *previous* frame and kept with
-  /// hysteresis (see `bar_budget.dart`): compacting makes every module narrower,
-  /// so a decision made from a single measurement would oscillate.
-  bool _compact = false;
+  /// The decision itself lives in `bar_budget.dart`, where it is pure and
+  /// testable: it has to remember what the bar would need *without* the compact
+  /// form, or the two presentations would keep handing the decision back and
+  /// forth every frame. See [NeoBarBudget.observe].
+  final NeoBarBudget _budget = NeoBarBudget();
 
   /// Measured size of each visible pill along the bar's main axis.
   ///
@@ -319,7 +321,7 @@ class _BarContentState extends State<_BarContent>
     crossExtent: _pillCrossExtent,
     // The bar's budget verdict, shared by every module of this bar: modules
     // decide for themselves which of their parts is optional.
-    compact: _compact,
+    compact: _budget.compact,
     options: id == null
         ? const <String, Object?>{}
         : widget.state.config.optionsOf(id),
@@ -608,33 +610,41 @@ class _BarContentState extends State<_BarContent>
               descriptors,
               moduleContext,
             );
-            // Budget: what the pills measured last frame want, against the room
-            // the strip actually has. Zero-extent pills are skipped by
-            // `neoRunExtent`, exactly as the layout skips them.
-            _compact = neoShouldCompact(
-              compact: _compact,
-              available: horizontal ? size.width : size.height,
-              needed:
-                  neoRunExtent(
-                    extents: <double>[
-                      for (final placement in visible)
-                        _pillExtents[placement.id] ?? 0,
-                    ],
-                    gap: _gap(density),
-                  ) +
-                  _mainPadding * 2,
-            );
+            // Budget, on the pills measured during the *previous* frame: what
+            // they took, against the room the strip actually has. Zero-extent
+            // pills are skipped by `neoRunExtent`, exactly as the layouts skip
+            // them. The same total decides whether the pills fit (below, through
+            // `neoPillsFit`) and whether the modules have to give up their
+            // optional parts, so the two can never answer differently.
+            final available = horizontal ? size.width : size.height;
+            final needed =
+                neoRunExtent(
+                  extents: <double>[
+                    for (final placement in visible)
+                      _pillExtents[placement.id] ?? 0,
+                  ],
+                  gap: _gap(density),
+                ) +
+                _mainPadding * 2;
+            final wasCompact = _budget.compact;
+            _budget.observe(available: available, needed: needed);
+            // A presentation change is a content change: the pills that are
+            // about to render have not been measured in their new form yet, so
+            // this frame is measured by the flex layout instead of being placed
+            // by the sizes of the presentation it just left.
+            final presentationChanged = _budget.compact != wasCompact;
 
             // Explicit positions whenever they are known, so that *any* change of
             // order animates — a drag, or a reorder from the settings card. The
-            // flex layout is the fallback for the first frame and for a bar whose
-            // content is too wide to place, where scrolling matters more than
-            // animation.
+            // flex layout is the fallback for the first frame, for the frame a
+            // presentation changes, and for a bar whose content is too wide to
+            // place, where scrolling matters more than animation.
             final boxes = _pillBoxes(visible);
-            if (boxes != null &&
+            if (!presentationChanged &&
+                boxes != null &&
                 neoPillsFit(
                   pills: boxes,
-                  mainExtent: horizontal ? size.width : size.height,
+                  mainExtent: available,
                   mainPadding: _mainPadding,
                   gap: _gap(density),
                 )) {
@@ -920,16 +930,21 @@ class _BarContentState extends State<_BarContent>
     final start = scrollable(group(NeoZone.start));
     final center = scrollable(group(NeoZone.center));
     final end = scrollable(group(NeoZone.end));
+    final gap = _gap(density);
 
     // Three real zones: start hugs the leading edge, end hugs the trailing edge,
-    // and centre sits in the middle — but they now share one budget instead of
-    // overlapping each other.
+    // and the centre zone sits centred in the room the other two leave it — the
+    // same slot `neoDragLayout` computes, so a pill does not move by a pixel when
+    // the bar switches between the two layouts (which it does in the frame a
+    // pill's size changes). That is why the gaps between neighbouring zones are
+    // spelled out here: they are part of the same budget `neoPillsFit` adds up.
     //
-    // The rule is a priority order, not equal shares: **the end zone keeps its
-    // natural width**, because that is where the clock and the status glyphs are
-    // and they are the parts a user reads at a glance; the centre zone takes what
-    // is left and scrolls when even that is not enough; the start zone is capped
-    // at half the strip so a bar full of workspace icons cannot swallow the rest.
+    // The rule for the room itself is a priority order, not equal shares: **the
+    // end zone keeps its natural width**, because that is where the clock and the
+    // status glyphs are and they are the parts a user reads at a glance; the
+    // centre zone takes what is left and scrolls when even that is not enough;
+    // the start zone is capped at half the strip so a bar full of workspace icons
+    // cannot swallow the rest.
     //
     // The previous layout gave start and end a `Flexible(flex: 1)` each and let
     // centre float over them in a `Stack`. Two consequences, both visible on a
@@ -939,46 +954,54 @@ class _BarContentState extends State<_BarContent>
     //
     // `stretch` on the outer axis gives each zone the strip's full cross extent,
     // which the group's own stretch then passes down to the cards.
-    final Widget layout;
     final maxStartExtent =
         (horizontal ? constraints.maxWidth : constraints.maxHeight) / 2;
-    if (horizontal) {
-      layout = Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (start case final start?)
-            Flexible(
-              child: ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: maxStartExtent),
-                child: start,
-              ),
+    final startSlot = start == null
+        ? null
+        : Flexible(
+            child: ConstrainedBox(
+              constraints: horizontal
+                  ? BoxConstraints(maxWidth: maxStartExtent)
+                  : BoxConstraints(maxHeight: maxStartExtent),
+              child: start,
             ),
-          if (center case final center?)
-            Expanded(
-              child: Align(alignment: Alignment.center, child: center),
-            ),
-          ?end,
-        ],
-      );
-    } else {
-      layout = Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (start case final start?)
-            Flexible(
-              child: ConstrainedBox(
-                constraints: BoxConstraints(maxHeight: maxStartExtent),
-                child: start,
-              ),
-            ),
-          if (center case final center?)
-            Expanded(
-              child: Align(alignment: Alignment.center, child: center),
-            ),
-          ?end,
-        ],
-      );
+          );
+    final centerSlot = center == null
+        ? null
+        : Expanded(
+            child: Align(alignment: Alignment.center, child: center),
+          );
+
+    final children = <Widget>[];
+    for (final slot in <Widget?>[startSlot, centerSlot, end]) {
+      if (slot == null) continue;
+      if (children.isNotEmpty) {
+        children.add(
+          SizedBox(width: horizontal ? gap : 0, height: horizontal ? 0 : gap),
+        );
+      }
+      children.add(slot);
     }
+    // The centre zone is the one that takes the room the other two leave. When
+    // it renders nothing there is no such child, and the end zone would sit next
+    // to the start zone — or at the leading edge — instead of against the
+    // trailing edge. A `Spacer` in its place keeps every zone on the edge the
+    // offsets in `neoDragLayout` promise, without adding a gap of its own.
+    if (centerSlot == null && end != null) {
+      // The end zone is always the last child, so the spacer goes just in front
+      // of it: after the start zone's own gap when there is one.
+      children.insert(children.length - 1, const Spacer());
+    }
+
+    final layout = horizontal
+        ? Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: children,
+          )
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: children,
+          );
 
     return Stack(
       key: _stripKey,

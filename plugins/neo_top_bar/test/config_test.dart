@@ -997,22 +997,82 @@ void main() {
       expect(placed['b']!.main, 1000 - 8 - 50);
     });
 
-    test('centres the centre zone in the strip', () {
+    test('centres the centre zone in the strip when it is alone', () {
       final placed = layout(const <NeoPillBox>[
         NeoPillBox(id: 'a', zone: NeoZone.center, extent: 100),
       ]);
       expect(placed['a']!.main, 450);
     });
 
-    test('keeps all three zones independent', () {
+    test('centres the centre zone in the room the other zones leave', () {
+      // Not the middle of the strip: the flex layout gives the centre zone the
+      // room between the start and end runs, one gap away from each, and the
+      // two layouts have to agree or the pill would move whenever the bar
+      // switches between them.
       final placed = layout(const <NeoPillBox>[
         NeoPillBox(id: 'l', zone: NeoZone.start, extent: 100),
         NeoPillBox(id: 'm', zone: NeoZone.center, extent: 60),
         NeoPillBox(id: 'r', zone: NeoZone.end, extent: 80),
       ]);
+      // room = 1000 - 8 - (100 + 6) - (80 + 6) - 8 = 792, so the centre pill
+      // starts 114 into the strip and is centred in what is left of it.
       expect(placed['l']!.main, 8);
-      expect(placed['m']!.main, 470);
+      expect(placed['m']!.main, 114 + (792 - 60) / 2);
       expect(placed['r']!.main, 1000 - 8 - 80);
+    });
+
+    test('a pill stays in its own room when the pills fit', () {
+      // The offsets are only used while the pills fit (`neoPillsFit`), and then
+      // no two of them may overlap: an overlap is what a stale or squeezed
+      // measurement looks like on screen.
+      for (final pills in <List<NeoPillBox>>[
+        const <NeoPillBox>[
+          NeoPillBox(id: 'l', zone: NeoZone.start, extent: 100),
+          NeoPillBox(id: 'm', zone: NeoZone.center, extent: 60),
+          NeoPillBox(id: 'r', zone: NeoZone.end, extent: 80),
+        ],
+        const <NeoPillBox>[
+          NeoPillBox(id: 'l1', zone: NeoZone.start, extent: 300),
+          NeoPillBox(id: 'l2', zone: NeoZone.start, extent: 120),
+          NeoPillBox(id: 'm', zone: NeoZone.center, extent: 340),
+          NeoPillBox(id: 'r', zone: NeoZone.end, extent: 200),
+        ],
+        // The centre and end zones only: the room is still the strip minus the
+        // padding, the gaps and what those two take.
+        const <NeoPillBox>[
+          NeoPillBox(id: 'm', zone: NeoZone.center, extent: 200),
+          NeoPillBox(id: 'r', zone: NeoZone.end, extent: 200),
+        ],
+        // No centre zone at all: the start and end runs are the whole row.
+        const <NeoPillBox>[
+          NeoPillBox(id: 'l', zone: NeoZone.start, extent: 100),
+          NeoPillBox(id: 'r', zone: NeoZone.end, extent: 100),
+        ],
+      ]) {
+        expect(
+          neoPillsFit(pills: pills, mainExtent: 1000, mainPadding: 8, gap: 6),
+          isTrue,
+          reason: '$pills has to fit for this to be about the layout',
+        );
+        final placed = layout(pills);
+        final runs = <({String id, double main, double extent})>[
+          for (final pill in pills)
+            (
+              id: pill.id,
+              main: placed[pill.id]!.main,
+              extent: placed[pill.id]!.extent,
+            ),
+        ]..sort((a, b) => a.main.compareTo(b.main));
+        for (var index = 1; index < runs.length; index++) {
+          final previous = runs[index - 1];
+          final current = runs[index];
+          expect(
+            previous.main + previous.extent,
+            lessThanOrEqualTo(current.main),
+            reason: '${current.id} overlaps ${previous.id}',
+          );
+        }
+      }
     });
 
     test('stretches every pill across the padded cross axis', () {
