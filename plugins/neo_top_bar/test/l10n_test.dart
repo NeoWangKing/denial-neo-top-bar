@@ -182,6 +182,10 @@ _samples = <String, ({String zh, String en})>{
     zh: zh.launcherMenuNewWindow,
     en: en.launcherMenuNewWindow,
   ),
+  'launcherMenuMinimizeWindow': (
+    zh: zh.launcherMenuMinimizeWindow,
+    en: en.launcherMenuMinimizeWindow,
+  ),
   'launcherMenuCloseWindow': (
     zh: zh.launcherMenuCloseWindow,
     en: en.launcherMenuCloseWindow,

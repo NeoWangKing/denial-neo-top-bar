@@ -212,8 +212,26 @@ PUB_HOSTED_URL=https://pub.flutter-io.cn "$DENIAL_SRC/tools/denial-plugins" subm
 
 判断标准：`status` 里的 `configuration.build-kit` 指向的 kit，其 `kit.json` 的
 `identity.source_revision` 要等于**正在运行的那个 deniald** 的源码修订（dev 构建就是
-`~/Projects/Denial/denial` 的 `git rev-parse HEAD`）。kit 哈希是按输入算的，所以同一个构建
-每次算出来都一样（这台机器上 dev 构建 = `b48ea491…`，0.5.0 包 = `8b3b2d88…`）。
+`~/Projects/Denial/denial` 的 `git rev-parse HEAD`）。kit 哈希是按输入算的，同一个构建每次
+算出来都一样——但**别把哈希写进文档**：Denial 每重建一次（换一个修订）哈希就换一个，
+旧 kit 还会被 bootstrap 顺手删掉。要用哪个直接读 `status`：
+
+```sh
+"$DENIAL_SRC/tools/denial-plugins" --brief status | python3 -c \
+  'import json,sys; print(json.load(sys.stdin)["configuration"]["build-kit"])'
+```
+
+**本地 `pubspec_overrides.yaml` / `.dart_tool` 要跟着这个 kit 走**，否则 `dart analyze` 会
+突然报几千条（指向已删除的旧 kit 路径）。换 kit 后重新解一次即可：
+
+```sh
+KIT=$(上面的命令)
+PUB_HOSTED_URL=https://pub.flutter-io.cn "$KIT/flutter/bin/flutter" pub get
+```
+
+（这个坑 2026-10-12 踩过一次：宿主从 `70db4a5` 更新到 `31c95ba` 后 kit 从 `b48ea491…`
+换成 `88c75498…`，旧路径没了，本地 analyze 从"零告警"变成 2546 条。宿主的 manager 自己
+不受影响——它在 kit 内部构建，所以那几次 apply 一直是好的。）
 
 顺带一个反直觉但正常的现象：**dev 会话和系统会话共用** `~/.local/state/denial/plugins`，
 所以两边切换登录时 shell 会各自重建一次插件候选（切换期间黑几秒），属预期行为。
@@ -758,7 +776,7 @@ center 拿剩下的并在不够时滚动，start 最多占一半（免得一堆�
 
 | 右键位置 | 菜单 | 动作 |
 |---|---|---|
-| 某个窗口图标 | 标题 = 那个窗口的标题 | 新窗口（目录里找得到这个 app 才有）· 关闭窗口 |
+| 某个窗口图标 | 标题 = 那个窗口的标题 | 新窗口（目录里找得到这个 app 才有）· 最小化 · 关闭窗口 |
 | Arch 图标 | 标题 = 「应用启动器」 | 打开应用启动器 · 打开终端（目录里找得到终端才有）· 设置（分隔线之后，和栏菜单同一个位置惯例） |
 
 - **手势竞技场决定谁接右键**：窗口图标 / Arch 图标是更深的手势识别器，所以点中它们时菜单归它们；
@@ -771,15 +789,43 @@ center 拿剩下的并在不够时滚动，start 最多占一半（免得一堆�
 - **「打开终端」靠一份词表猜**（`neoTerminalWords`，如 `kitty`/`foot`/`ghostty`/`wezterm`/`org.gnome.Terminal`）：
   宿主的应用目录里**没有**「这是终端」这个字段，只有 appId 和显示名，所以按 appId 末段或名字匹配，
   词表短且明确，末尾才放通用的 `terminal`。目录里一个都匹配不上就**不显示**这一项。
-- **没有做、也做不了的**（宿主对 surface 插件没有这些 API，不是偷懒）：
-  - *固定到栏*：Denial 的 pinned 窗口是「所有工作区可见」，没有任何请求能设置它；launcher 的收藏
-    也在 launcher 插件自己的状态里，surface 插件拿不到；
-  - *最小化*：wire 协议有 `WindowActionKind.Minimize`，但那是宿主→外壳的事件，没有反向请求；
-  - *强制结束（杀进程）*：协议里只有 close 请求，没有 PID，也没有 kill；
-  - *打开 Denial 自己的设置*：`ShortcutActionKind.OpenSettings` 是宿主内部的动作，插件没有通道，
-    所以菜单里的「设置」是**这个栏**的设置卡。
-  这四样要做得先扩宿主：wire 加请求类型 + 原生实现 + `ShellWindowServices` 加方法，属于 Denial 本体
-  的改动，不是这个插件能单独完成的。
+- **最小化**走 `ShellWindowServices.minimizeWindow(id)`（`31c95ba` 起才有，见下面「SDK 缺什么就提
+  issue」）。**关闭窗口**走 `shellControllerProvider.notifier.closeWindow(DenialWindow)`——注意
+  `ShellWindowServices` 里**没有** close：`activateWindow`/`minimizeWindow` 都只收 object id，
+  唯独关窗要整个 window 记录，所以这里得按 `objectId` 去 `openWindows` 里找（已在 issue 里建议补
+  `closeWindow(int id)` 让三者对称）。
+- **没有做、当前宿主也没给的**（不是偷懒，是 API 不存在）：
+  - *固定到栏 / 取消固定*：`pinned` 在 Denial 里是「所有工作区可见」，没有任何请求能设置它；
+    始终置顶（always-on-top）只有**快捷键** `ToggleWindowAlwaysOnTop`，而且是"对当前焦点窗口"
+    的，没有按 window id 的版本；launcher 的收藏也在 launcher 插件自己的状态里，surface 插件
+    拿不到；
+  - *强制结束（杀进程）*：协议里只有 close **请求**（应用仍可弹「要不要保存」），没有 PID、没有
+    kill。Windows 的任务栏那一条也只是 close，杀进程在任务管理器里——所以菜单文案是「关闭窗口」；
+  - *打开 Denial 自己的设置*：`ShortcutActionKind.OpenSettings` 是宿主内部动作；`ShellDesktopServices`
+    里有 `openPowerSettings()` 却没有对应的 `openSettings()`，所以菜单里的「设置」是**这个栏**的
+    设置卡。
+  这几样要做得先扩宿主：wire 加请求类型 + 原生实现 + `ShellWindowServices`/`ShellDesktopServices`
+  加方法。Denial 作者说过「缺什么就开 issue」，所以按这条路线走（见下一节）。
+
+### SDK 缺什么就提 issue（Denial 作者的邀请）
+
+Denial 作者在群里说过：开发插件时发现 SDK 缺功能，就到 GitHub 开 issue 说明需要什么，
+他加到 SDK 里。所以这个插件的规矩是：
+
+1. **先用现有 API 把能做的做完**，不因为缺一个 API 就整块不做（比如「打开终端」用应用目录的
+   appId 匹配实现，不需要新 API）；
+2. 缺的部分**写进 README 的「没有做、当前宿主也没给的」清单**，写明原因和需要的接口形状；
+3. 攒够一条就**去 `github.com/denialwm/denial` 开 issue**，按仓库里已有插件请求的格式写
+   （`#218` 是很好的模板：The problem / Why the plugin can't do it / Request / Scope /
+   还有更低成本的替代方案），并**点名具体的扩展点**（例如
+   `protocol/denial.fbs` 的 `WindowRequestKind`、`wire/decode.rs`、`ShellWindowServices`），
+   这样实现成本一眼可见；
+4. 顺手确认没有重复 issue（`gh issue list --repo denialwm/denial --search "..."`），
+   已有就补充信息而不是再开一条。
+
+这个项目里已经提过并落地的例子：`MinimizeWindow`（wire + `ShellWindowServices.minimizeWindow`）
+就是 `31c95ba` 加进来的，所以菜单里的「最小化」能直接用；仍然缺的是**固定/置顶**、**按 window id
+的 always-on-top**、**`openSettings()`**、以及 **`closeWindow(int id)` 的对称性**。
 
 ### 启动器的设置：图标来源与窗口列表
 

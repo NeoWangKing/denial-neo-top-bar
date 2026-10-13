@@ -348,6 +348,7 @@ class NeoStrings {
   String get launcherMenuOpenLauncher => _t('打开应用启动器', 'Open the app launcher');
   String get launcherMenuOpenTerminal => _t('打开终端', 'Open a terminal');
   String get launcherMenuNewWindow => _t('新窗口', 'New window');
+  String get launcherMenuMinimizeWindow => _t('最小化', 'Minimize');
   String get launcherMenuCloseWindow => _t('关闭窗口', 'Close window');
   String get launcherDenialUnavailable => _t(
     'Denial 官方图标还没有发布，所以这一项暂时不能选。',
